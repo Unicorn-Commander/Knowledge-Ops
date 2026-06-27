@@ -54,7 +54,10 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | Method | Path | Notes |
 |---|---|---|
 | GET  | `/health` | Liveness — `{"ok": true}` |
-| GET  | `/` | Service info |
+| GET  | `/` | Redirects to the web GUI at `/ui/` |
+| GET  | `/ui/` | **Web GUI** (Ask/Ground, Wiki, Files, Metrics, Sources) |
+| GET  | `/info` | Service info JSON |
+| POST | `/mcp` | **HTTP-MCP JSON-RPC** (`initialize`/`tools/list`/`tools/call`) for the Brigade broker |
 | GET  | `/.well-known/mcps.json` | Brigade federation manifest |
 | GET  | `/docs` | OpenAPI / Swagger |
 | POST | `/kb.search` | body: `{query, scope?, sources?, k?}` |
@@ -83,6 +86,48 @@ curl -s -X POST http://127.0.0.1:8765/kb.ground \
 #               Citations:\n[1] wiki:Magic Unicorn — Marketing & Brand Bible (v1) ...",
 #     "passages":[ ... cited Passage objects ... ]}
 ```
+
+## Web GUI
+
+The FastAPI app serves its own single-page GUI at **`/ui/`** (static files under
+`knowledge_ops/static/`, vanilla JS — no build step, no CDN). `/` redirects there.
+On-brand Magic Unicorn (dark + purple/gradient, tokens from `magic-unicorn-ui`).
+Sections: **Ask/Ground** (hero — cited answers with source/scope/owner clearly
+attributed), **Wiki** (list/view/edit/history), **Files** (find + deep-read),
+**Metrics** (SVG charts), **Sources/Status** (federated sources + the registered
+MCP tools from the manifest).
+
+## HTTP-MCP (`POST /mcp`)
+
+`POST /mcp` speaks MCP JSON-RPC (`initialize`, `tools/list`, `tools/call`, `ping`)
+so the Brigade broker's **brokered execution** works, not just registration.
+`tools/call` dispatches to the same functions the REST routes use; the tool
+catalog is single-sourced from `.well-known/mcps.json`. Verify:
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+When `KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1` (set on the public bigboy deploy), every
+`tools/call` must carry a valid Brigade-minted RS256 JWT (`aud=knowledge-ops`,
+issuer in `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS`, verified against
+`KNOWLEDGE_OPS_MCP_JWKS_URL`) — exactly the contract in the manifest's
+`auth.federated_auth`. `initialize`/`tools/list`/`ping` stay open (public
+metadata). Off by default, so local/tests/standalone need no token.
+
+## Public auth gate (oauth2-proxy + Keycloak)
+
+On bigboy the public host is fronted by `knowledge-ops-oauth2-proxy`
+(Keycloak `uchub` realm, Magic Unicorn SSO) — see `docker-compose.bigboy.yml`.
+Traefik routes the host to the proxy (`:4180`), which proxies to
+`http://knowledge-ops:8765` after SSO. **Whitelisted (public): `/health`,
+`/.well-known/mcps.json`, `/mcp`** — so monitoring, the broker's manifest fetch,
+and brokered execution keep working (the app enforces the Brigade JWT on `/mcp`
+itself). Humans hitting `/ui` or `/kb.*` get Magic Unicorn SSO. The **in-cluster**
+`http://knowledge-ops:8765` is unchanged/open for agents (the proxy only sits on
+the Traefik path). Revert the gate by restoring the pre-auth compose backup and
+deleting the Keycloak `knowledge-ops` client.
 
 ## Deploy & Persistence
 

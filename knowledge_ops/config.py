@@ -33,6 +33,22 @@ class Settings(BaseModel):
     enable_center_deep: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_CENTER_DEEP", "0") == "1"
     enable_falkordb: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_FALKORDB", "0") == "1"
 
+    # HTTP-MCP /mcp Brigade-JWT gate. Off by default (local/tests/standalone need
+    # no token); set =1 on the public deploy where oauth2-proxy whitelists /mcp so
+    # the broker reaches us — then the Brigade JWT is enforced here. Defaults match
+    # .well-known/mcps.json auth.federated_auth.
+    mcp_require_jwt: bool = os.getenv("KNOWLEDGE_OPS_MCP_REQUIRE_JWT", "0") == "1"
+    mcp_jwks_url: str = os.getenv("KNOWLEDGE_OPS_MCP_JWKS_URL", "https://brigade.magicunicorn.dev/.well-known/jwks.json")
+    mcp_expected_audience: str = os.getenv("KNOWLEDGE_OPS_MCP_AUDIENCE", "knowledge-ops")
+    mcp_trusted_issuers: list[str] = Field(default_factory=lambda: [
+        i.strip() for i in os.getenv(
+            "KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS",
+            "https://brigade.magicunicorn.dev,https://brigade.unicorncommander.ai",
+        ).split(",") if i.strip()
+    ])
+    mcp_jwks_ttl: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWKS_TTL", "3600"))
+    mcp_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWT_LEEWAY", "60"))
+
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.wiki_dir.mkdir(parents=True, exist_ok=True)

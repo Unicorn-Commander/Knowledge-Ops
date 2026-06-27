@@ -8,6 +8,8 @@ dependencies = [
   "uvicorn>=0.27",
   "pydantic>=2",
   "httpx>=0.26",
+  # /mcp Brigade-JWT verification (lazy: only used when KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1)
+  "pyjwt[crypto]>=2.8",
 ]
 
 [project.optional-dependencies]

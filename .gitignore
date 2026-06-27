@@ -22,6 +22,11 @@ dist/
 venv/
 env/
 
+# Secrets — oauth2-proxy env files live only on the host (never committed/rsynced)
+.env
+.env.*
+*.env.oauth2
+
 # OS / editor
 .DS_Store
 *.swp

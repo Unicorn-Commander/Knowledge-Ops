@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Knowledge-Ops — Magic Unicorn</title>
+  <meta name="description" content="Ask the organization's knowledge, get a cited answer. Magic Unicorn federated grounding layer." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23b66eff'/%3E%3Cstop offset='1' stop-color='%2300d4ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='url(%23g)'/%3E%3Ctext x='50' y='68' font-size='56' text-anchor='middle' font-family='Inter,Arial' font-weight='900' fill='%2307050b'%3EK%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="#ask">
+        <span class="mark">K</span>
+        <span>
+          <span class="brand__name">Knowledge<b>-Ops</b></span>
+          <span class="brand__tag">Innovation That Doesn't Apologize</span>
+        </span>
+      </a>
+      <div class="nav__status" id="navStatus" title="Service status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">checking…</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="side" id="sideNav">
+      <button class="side__btn active" data-view="ask"><span class="ico">◎</span> Ask / Ground</button>
+      <button class="side__btn" data-view="wiki"><span class="ico">▤</span> Wiki</button>
+      <button class="side__btn" data-view="files"><span class="ico">⌕</span> Files</button>
+      <button class="side__btn" data-view="metrics"><span class="ico">◷</span> Metrics</button>
+      <button class="side__btn" data-view="sources"><span class="ico">⛓</span> Sources</button>
+      <div class="side__hint">
+        Storage-opaque federation across wiki, file index, Qdrant, FalkorDB &amp; org memory. Every answer is scoped and cited.
+      </div>
+    </nav>
+
+    <main class="main">
+      <!-- ============ ASK / GROUND ============ -->
+      <section class="view active" id="view-ask">
+        <p class="kicker">◇ Grounded answers</p>
+        <h1 class="title">Ask the org's knowledge, <span class="grad">get a cited answer.</span></h1>
+        <p class="lede">Knowledge-Ops federates every store, merges and re-ranks the evidence, enforces scope (RLS), and returns passages with their source clearly attributed.</p>
+
+        <div class="card card--strong">
+          <div class="field">
+            <textarea class="textarea" id="askQuery" placeholder="e.g. What is Magic Unicorn? &nbsp;/&nbsp; What is our brand voice?" style="min-height: 84px;"></textarea>
+          </div>
+          <div class="row" style="justify-content: space-between;">
+            <div class="row">
+              <div>
+                <label class="lbl" for="askScope">Scope (RLS)</label>
+                <select class="select" id="askScope">
+                  <option value="">default</option>
+                  <option value="global">global</option>
+                  <option value="personal">personal</option>
+                  <option value="all">all (admin)</option>
+                </select>
+              </div>
+              <div>
+                <label class="lbl" for="askK">Evidence (k)</label>
+                <select class="select" id="askK">
+                  <option>4</option><option selected>6</option><option>8</option><option>12</option>
+                </select>
+              </div>
+              <div>
+                <label class="lbl" for="askMode">Mode</label>
+                <select class="select" id="askMode">
+                  <option value="ground" selected>Ground (verdict + summary)</option>
+                  <option value="search">Search (raw passages)</option>
+                </select>
+              </div>
+            </div>
+            <div style="align-self: flex-end;">
+              <button class="btn btn--primary" id="askBtn">Ground it →</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="askResult" style="margin-top: 1.2rem;"></div>
+      </section>
+
+      <!-- ============ WIKI ============ -->
+      <section class="view" id="view-wiki">
+        <p class="kicker">▤ Wiki</p>
+        <h1 class="title">Wiki <span class="grad">store</span></h1>
+        <p class="lede">Versioned markdown docs, indexed for grounding. Browse, read, edit, and view history.</p>
+
+        <div class="grid grid--2" style="align-items: start;">
+          <div class="card">
+            <div class="row" style="justify-content: space-between; margin-bottom: 0.6rem;">
+              <h2 class="section" style="margin: 0;">Documents</h2>
+              <button class="btn btn--sm" id="wikiNewBtn">+ New</button>
+            </div>
+            <div class="field"><input class="input" id="wikiFilter" placeholder="Filter docs…" /></div>
+            <div class="list" id="wikiList"><div class="loading"><span class="spinner"></span> loading…</div></div>
+          </div>
+          <div class="card card--strong" id="wikiPane">
+            <div class="empty"><div class="big">▤</div>Select a document to read, edit, or view its history.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FILES ============ -->
+      <section class="view" id="view-files">
+        <p class="kicker">⌕ File index</p>
+        <h1 class="title">Files <span class="grad">deep-read</span></h1>
+        <p class="lede">Search the indexed file corpus, then deep-read every chunk of a single file.</p>
+
+        <div class="card card--strong">
+          <div class="row">
+            <input class="input" id="fileQuery" placeholder="Search files… e.g. brand bible, agent topology" style="flex: 1; min-width: 220px;" />
+            <select class="select" id="fileScope">
+              <option value="">default</option>
+              <option value="personal">personal</option>
+              <option value="global">global</option>
+              <option value="all">all</option>
+            </select>
+            <button class="btn btn--primary" id="fileBtn">Search</button>
+          </div>
+        </div>
+        <div id="fileResult" style="margin-top: 1.2rem;"></div>
+        <div id="fileDeep" style="margin-top: 1.2rem;"></div>
+      </section>
+
+      <!-- ============ METRICS ============ -->
+      <section class="view" id="view-metrics">
+        <p class="kicker">◷ Metrics</p>
+        <h1 class="title">Metrics <span class="grad">&amp; charts</span></h1>
+        <p class="lede">Named timeseries with server-rendered SVG charts.</p>
+
+        <div class="card card--strong">
+          <div class="row">
+            <input class="input" id="metricName" placeholder="metric name, e.g. qwen.orchestrator.plan_seconds" style="flex: 1; min-width: 240px;" />
+            <button class="btn btn--primary" id="metricBtn">Render chart</button>
+          </div>
+          <p class="dim" style="margin: 0.6rem 0 0; font-size: 0.78rem;">Tip: the demo seed records <code class="mono">qwen.orchestrator.plan_seconds</code>.</p>
+        </div>
+        <div id="metricResult" style="margin-top: 1.2rem;"></div>
+      </section>
+
+      <!-- ============ SOURCES / STATUS ============ -->
+      <section class="view" id="view-sources">
+        <p class="kicker">⛓ Federation</p>
+        <h1 class="title">Sources <span class="grad">&amp; status</span></h1>
+        <p class="lede">The federated stores Knowledge-Ops queries, their live status, and the MCP tools registered with the Brigade broker.</p>
+
+        <h2 class="section">Federated sources</h2>
+        <div class="grid grid--3" id="sourcesGrid"><div class="loading"><span class="spinner"></span> loading…</div></div>
+
+        <h2 class="section">Registered MCP tools <span class="pill" id="toolNs">knowledge</span></h2>
+        <div class="list" id="toolsList"><div class="loading"><span class="spinner"></span> loading…</div></div>
+
+        <h2 class="section">Endpoints</h2>
+        <div class="card">
+          <div class="list" id="endpointsList"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot">
+    <span>Magic Unicorn · Knowledge-Ops <span id="versionTag" class="dim"></span></span>
+    <span><a href="/.well-known/mcps.json">manifest</a> · <a href="/docs">API docs</a> · <a href="/health">health</a></span>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
