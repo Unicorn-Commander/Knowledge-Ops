@@ -1,0 +1,26 @@
+[project]
+name = "knowledge-ops"
+version = "0.1.0"
+description = "Magic Unicorn federated grounding layer"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "pydantic>=2",
+  "httpx>=0.26",
+]
+
+[project.optional-dependencies]
+# MCP stdio runtime (kb.* tools for Brigade / Claude Desktop / Cursor).
+mcp = ["mcp>=1.0.0"]
+# Live store adapters: Qdrant uses httpx (already a core dep); FalkorDB needs a
+# RedisGraph client. Install with: pip install 'knowledge-ops[live]'
+live = ["redis>=5"]
+all = ["mcp>=1.0.0", "redis>=5"]
+
+[project.scripts]
+knowledge-ops = "knowledge_ops.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

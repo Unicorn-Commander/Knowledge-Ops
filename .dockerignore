@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.svg
+tests/
+deploy/
+scripts/
+*.md
+!README.md

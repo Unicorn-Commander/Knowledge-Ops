@@ -1,0 +1,33 @@
+# Knowledge-Ops base compose — standalone / Mac-runnable.
+# Live store adapters (Qdrant/FalkorDB) are OFF here so this comes up anywhere.
+# For bigboy (next to the real stores + Brigade), layer the override:
+#   docker compose -f docker-compose.yml -f docker-compose.bigboy.yml up -d
+services:
+  knowledge-ops:
+    build: .
+    image: knowledge-ops:latest
+    container_name: knowledge-ops
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      # SQLite + WAL persist across restarts/redeploys.
+      - knowledge_ops_data:/data
+    environment:
+      KNOWLEDGE_OPS_DATA: /data
+      KNOWLEDGE_OPS_DB: /data/knowledge_ops.sqlite3
+      KNOWLEDGE_OPS_WIKI: /opt/knowledge-ops/wiki
+      # Live adapters default OFF. Enable via the bigboy override (or set =1 here
+      # plus the matching *_URL envs if your stores are reachable).
+      KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
+      KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
+      KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  knowledge_ops_data:

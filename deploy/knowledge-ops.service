@@ -1,0 +1,36 @@
+[Unit]
+Description=Knowledge-Ops — Magic Unicorn federated grounding layer
+Documentation=https://git.unicorncommander.ai/UnicornCommander/Knowledge-Ops
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+# Adjust User/paths to the deploy host. Default layout: repo at /opt/knowledge-ops
+# with a venv at /opt/knowledge-ops/.venv (python -m venv .venv && .venv/bin/pip install '.[all]').
+User=knowledge-ops
+Group=knowledge-ops
+WorkingDirectory=/opt/knowledge-ops
+Environment=KNOWLEDGE_OPS_HOME=/opt/knowledge-ops
+Environment=KNOWLEDGE_OPS_DATA=/var/lib/knowledge-ops
+Environment=KNOWLEDGE_OPS_DB=/var/lib/knowledge-ops/knowledge_ops.sqlite3
+Environment=KNOWLEDGE_OPS_WIKI=/opt/knowledge-ops/wiki
+# --- Live adapters: uncomment + point at the real stores to enable (read-only) ---
+# Environment=KNOWLEDGE_OPS_ENABLE_QDRANT=1
+# Environment=KNOWLEDGE_OPS_QDRANT_URL=http://127.0.0.1:6333
+# Environment=KNOWLEDGE_OPS_EMBED_BASE_URL=http://127.0.0.1:8086/v1
+# Environment=KNOWLEDGE_OPS_ENABLE_FALKORDB=1
+# Environment=KNOWLEDGE_OPS_FALKORDB_URL=redis://127.0.0.1:6380
+# Environment=KNOWLEDGE_OPS_FALKORDB_GRAPH=brigade_global
+ExecStart=/opt/knowledge-ops/.venv/bin/python -m uvicorn knowledge_ops.api:app --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=3
+# Persisted data dir (also satisfied by systemd if it owns the path).
+StateDirectory=knowledge-ops
+# Light hardening.
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

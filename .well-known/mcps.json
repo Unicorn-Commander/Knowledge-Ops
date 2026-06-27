@@ -1,0 +1,162 @@
+{
+  "$schema": "https://unicorncommander.ai/schemas/mcps-manifest-v1.json",
+  "name": "Knowledge-Ops",
+  "version": "0.1.0",
+  "description": "Magic Unicorn federated grounding layer. Agents call knowledge.search / knowledge.ground; the service decides which stores to query (org_memory, wiki, file_index, Qdrant, FalkorDB, Center Deep), merges evidence, enforces scope (RLS), and returns cited passages. Storage-opaque: agents never touch Qdrant/FalkorDB/Center Deep directly.",
+  "tool_namespace": "knowledge",
+  "mcp_endpoint": "https://knowledge-ops.magicunicorn.dev/mcp",
+  "rest_base": "https://knowledge-ops.magicunicorn.dev",
+  "health": "https://knowledge-ops.magicunicorn.dev/health",
+  "transport": "rest",
+  "stdio": {
+    "command": "python3",
+    "args": ["-m", "knowledge_ops.mcp_server"],
+    "cwd": "/opt/knowledge-ops",
+    "note": "Local transport for Claude Desktop / Cursor (see KNOWLEDGE-OPS.md). The HTTPS mcp_endpoint above is the broker-facing HTTP-MCP surface (see report: REST is live today, HTTP-MCP JSON-RPC is the remaining tools/call wiring)."
+  },
+  "auth": {
+    "supported": ["none", "brigade_jwt"],
+    "federated_auth": {
+      "expected_audience": "knowledge-ops",
+      "signing_algorithm": "RS256",
+      "jwks_url": "https://brigade.magicunicorn.dev/.well-known/jwks.json",
+      "trusted_issuers": ["https://brigade.magicunicorn.dev"],
+      "jwks_refresh_seconds": 3600
+    }
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Federated lexical+semantic search across all enabled sources. Returns merged, re-ranked, cited passages.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "POST", "path": "/kb.search"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "scope": {"type": "string", "enum": ["global", "personal", "all"], "description": "RLS scope filter; omit for default."},
+          "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of org_memory|wiki|file_index|qdrant|falkordb|center_deep."},
+          "k": {"type": "integer", "default": 8}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "ground",
+      "description": "Ground a claim/question against the corpus. Returns a verdict (evidence_found|not_enough_evidence), a grounded summary, and the supporting cited passages.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "POST", "path": "/kb.ground"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "The claim or question to ground."},
+          "scope": {"type": "string", "enum": ["global", "personal", "all"]},
+          "k": {"type": "integer", "default": 8}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "list_sources",
+      "description": "List federated sources and whether each is enabled/configured/disabled.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.list_sources"},
+      "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+      "name": "get_doc",
+      "description": "Fetch a single wiki document by id or path.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.get_doc"},
+      "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    },
+    {
+      "name": "list_docs",
+      "description": "List wiki documents (id, path, title, scope, owner, updated_at).",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.docs"},
+      "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+      "name": "doc_history",
+      "description": "Version history for a wiki document.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.doc_history"},
+      "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    },
+    {
+      "name": "find_file",
+      "description": "Search the indexed file corpus and return best-matching files/chunks.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.find_file"},
+      "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}, "k": {"type": "integer", "default": 8}, "scope": {"type": "string"}},
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "deep_read",
+      "description": "Read all indexed chunks for a single file path, ordered/relevance-ranked.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.deep_read"},
+      "input_schema": {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "query": {"type": "string"}, "k": {"type": "integer", "default": 8}},
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "upsert_doc",
+      "description": "Create or update a wiki document (versioned).",
+      "scopes_required": ["write:knowledge"],
+      "tier_required": "free",
+      "read_only": false,
+      "rest": {"method": "POST", "path": "/kb.upsert_doc"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "md": {"type": "string"},
+          "scope": {"type": "string", "default": "global"},
+          "owner": {"type": "string", "default": "magic-unicorn"}
+        },
+        "required": ["path", "md"]
+      }
+    },
+    {
+      "name": "record_metric",
+      "description": "Record a named timeseries metric value with tags.",
+      "scopes_required": ["write:knowledge"],
+      "tier_required": "free",
+      "read_only": false,
+      "rest": {"method": "POST", "path": "/kb.record_metric"},
+      "input_schema": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "value": {"type": "number"}, "tags": {"type": "object"}},
+        "required": ["name", "value"]
+      }
+    }
+  ],
+  "resources": [
+    {"uri": "knowledge://sources", "description": "Federated source catalog and status."},
+    {"uri": "knowledge://docs", "description": "Wiki document list."}
+  ],
+  "prompts": []
+}
