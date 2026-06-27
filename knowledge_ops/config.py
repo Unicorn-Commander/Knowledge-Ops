@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,11 @@ class Settings(BaseModel):
     qdrant_collections: list[str] = Field(default_factory=lambda: [
         c.strip() for c in os.getenv("KNOWLEDGE_OPS_QDRANT_COLLECTIONS", "org_memory,stable_documents").split(",") if c.strip()
     ])
+    falkordb_graphs: list[str] = Field(default_factory=lambda: [
+        g.strip() for g in os.getenv("KNOWLEDGE_OPS_FALKORDB_GRAPHS", os.getenv("KNOWLEDGE_OPS_FALKORDB_GRAPH", "brigade_global")).split(",") if g.strip()
+    ])
+    rest_sources: list[dict] = Field(default_factory=lambda: json.loads(os.getenv("KNOWLEDGE_OPS_REST_SOURCES", "[]")))
+    postgres_sources: list[dict] = Field(default_factory=lambda: json.loads(os.getenv("KNOWLEDGE_OPS_POSTGRES_SOURCES", "[]")))
     embed_base_url: str = os.getenv("KNOWLEDGE_OPS_EMBED_BASE_URL", "http://127.0.0.1:8086/v1").rstrip("/")
     embed_model: str = os.getenv("KNOWLEDGE_OPS_EMBED_MODEL", "BAAI/bge-m3")
     embed_dims: int = int(os.getenv("KNOWLEDGE_OPS_EMBED_DIMS", "1024"))

@@ -100,8 +100,11 @@ def _query_sync(query: str, k: int, graph: str) -> list[Passage]:
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
 
 
-async def search_falkordb(query: str, k: int = 5, scope: str | None = None) -> list[Passage]:
+async def search_falkordb(query: str, k: int = 5, scope: str | None = None, graphs: list[str] | None = None) -> list[Passage]:
     if not settings.enable_falkordb:
         return []
     # The redis client is sync; run it off the event loop so we never block it.
-    return await asyncio.to_thread(_query_sync, query, k, settings.falkordb_graph)
+    hits: list[Passage] = []
+    for graph in graphs or settings.falkordb_graphs:
+        hits.extend(await asyncio.to_thread(_query_sync, query, k, graph))
+    return sorted(hits, key=lambda h: h.score, reverse=True)[:k]

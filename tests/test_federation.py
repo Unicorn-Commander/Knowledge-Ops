@@ -110,6 +110,39 @@ def test_list_sources_includes_falkordb():
     assert {"qdrant", "falkordb", "wiki", "org_memory"} <= names
 
 
+def test_list_sources_expands_configured_live_sources(monkeypatch):
+    import knowledge_ops.config as config
+    from knowledge_ops import federation
+
+    monkeypatch.setattr(config.settings, "enable_qdrant", True)
+    monkeypatch.setattr(config.settings, "qdrant_collections", ["meeting_transcripts", "crisis_evidence"])
+    monkeypatch.setattr(config.settings, "enable_falkordb", True)
+    monkeypatch.setattr(config.settings, "falkordb_graphs", ["brigade_global", "contact_ops__magic_unicorn_inc"])
+    monkeypatch.setattr(config.settings, "rest_sources", [{"name": "center_deep_catalogue", "url": "https://verify.centerdeep.online/api/v1/catalogue/quick-search"}])
+    monkeypatch.setattr(config.settings, "postgres_sources", [{"name": "accounting_ops", "dsn": "postgresql://example/db", "sql": "select 1"}])
+
+    names = {s.name for s in federation.list_sources()}
+    assert {
+        "qdrant:meeting_transcripts",
+        "qdrant:crisis_evidence",
+        "falkordb:contact_ops__magic_unicorn_inc",
+        "rest:center_deep_catalogue",
+        "postgres:accounting_ops",
+    } <= names
+
+
+def test_postgres_adapter_disabled_by_missing_driver_or_dead_dsn(monkeypatch):
+    import knowledge_ops.config as config
+    from knowledge_ops.adapters.postgres_source import search_postgres_sources
+
+    monkeypatch.setattr(config.settings, "postgres_sources", [{
+        "name": "accounting_ops",
+        "dsn": "postgresql://127.0.0.1:1/nope",
+        "sql": "select '1' as id, 'title' as title, 'body' as text",
+    }])
+    assert asyncio.run(search_postgres_sources("anything", names={"accounting_ops"})) == []
+
+
 def test_api_health_and_manifest_routes(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 

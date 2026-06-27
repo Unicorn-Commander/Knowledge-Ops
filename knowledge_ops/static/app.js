@@ -17,8 +17,11 @@ function fmtScore(s) { return (typeof s === "number") ? s.toFixed(2) : esc(s); }
 function fmtTime(t) { if (!t) return ""; try { return new Date(t).toLocaleString(); } catch { return esc(t); } }
 function srcClass(source) {
   const base = String(source || "other").split(":")[0];
-  const known = ["wiki", "falkordb", "qdrant", "file_index", "org_memory", "center_deep"];
+  const known = ["wiki", "falkordb", "qdrant", "file_index", "org_memory", "center_deep", "rest", "postgres"];
   return "src-" + (known.includes(base) ? base : "other");
+}
+function sourceLabel(source) {
+  return String(source || "other").replace(/^qdrant:/, "Q ").replace(/^falkordb:/, "G ").replace(/^rest:/, "API ").replace(/^postgres:/, "SQL ");
 }
 
 /* tiny, escape-first markdown renderer (headings, bold/italic, code, lists, links, quotes, hr, tables) */
@@ -104,7 +107,7 @@ function passageCard(p, i) {
   return `<div class="cite">
     <div class="cite__head">
       <span class="cite__n">${i}</span>
-      <span class="src-badge ${sc}">${esc(String(p.source).split(":")[0])}</span>
+      <span class="src-badge ${sc}">${esc(sourceLabel(p.source))}</span>
       <span class="cite__title">${esc(p.title || p.source_id || "untitled")}</span>
       ${scope}
       <span class="cite__meta">score ${fmtScore(p.score)} · ${owner}</span>
@@ -320,7 +323,7 @@ async function loadSources() {
     const sources = data.sources || [];
     grid.innerHTML = sources.map(s => {
       const pill = s.enabled ? `<span class="pill pill--ok">● ${esc(s.status)}</span>` : `<span class="pill pill--off">○ ${esc(s.status)}</span>`;
-      return `<div class="card"><div class="row" style="justify-content:space-between;"><span class="src-badge ${srcClass(s.name)}">${esc(s.name)}</span>${pill}</div><div class="dim mono" style="margin-top:.6rem;font-size:.74rem;word-break:break-all;">${esc(s.detail || "")}</div></div>`;
+      return `<div class="card"><div class="row" style="justify-content:space-between;"><span class="src-badge ${srcClass(s.name)}">${esc(sourceLabel(s.name))}</span>${pill}</div><div class="dim mono" style="margin-top:.6rem;font-size:.74rem;word-break:break-all;">${esc(s.detail || "")}</div></div>`;
     }).join("");
   } catch (e) { grid.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
   // MCP tools from the manifest
@@ -352,7 +355,7 @@ async function pulse() {
 /* ---------- boot ---------- */
 (function init() {
   const start = (location.hash || "#ask").slice(1);
-  if (["ask", "wiki", "files", "metrics", "sources"].includes(start)) showView(start); else showView("ask");
+  if (["ask", "wiki", "files", "metrics", "sources", "help"].includes(start)) showView(start); else showView("ask");
   pulse();
   setInterval(pulse, 30000);
 })();

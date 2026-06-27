@@ -30,10 +30,11 @@ async def search_qdrant(query: str, k: int = 5, scope: str | None = None, collec
             if scope and scope != "all":
                 flt = {"must": [{"key": "scope", "match": {"value": scope}}]}
             try:
-                res = await client.post(
-                    f"{settings.qdrant_url.rstrip('/')}/collections/{coll}/points/search",
-                    json={"vector": vector, "limit": k, "with_payload": True, "filter": flt},
-                )
+                payload = {"vector": vector, "limit": k, "with_payload": True, "filter": flt}
+                res = await client.post(f"{settings.qdrant_url.rstrip('/')}/collections/{coll}/points/search", json=payload)
+                if res.status_code in (400, 422):
+                    payload["vector"] = {"name": "dense", "vector": vector}
+                    res = await client.post(f"{settings.qdrant_url.rstrip('/')}/collections/{coll}/points/search", json=payload)
                 res.raise_for_status()
             except Exception:
                 continue

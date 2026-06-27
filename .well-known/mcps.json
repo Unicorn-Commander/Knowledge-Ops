@@ -2,7 +2,7 @@
   "$schema": "https://unicorncommander.ai/schemas/mcps-manifest-v1.json",
   "name": "Knowledge-Ops",
   "version": "0.1.0",
-  "description": "Magic Unicorn federated grounding layer. Agents call knowledge.search / knowledge.ground; the service decides which stores to query (org_memory, wiki, file_index, Qdrant, FalkorDB, Center Deep), merges evidence, enforces scope (RLS), and returns cited passages. Storage-opaque: agents never touch Qdrant/FalkorDB/Center Deep directly.",
+  "description": "Magic Unicorn federated grounding layer. Agents call knowledge.search / knowledge.ground; the service decides which stores to query (org_memory, wiki, file_index, Qdrant collections, FalkorDB graphs, Center Deep, REST adapters, read-only Postgres adapters), merges evidence, enforces scope (RLS), and returns cited passages. Storage-opaque: agents never touch backing stores directly.",
   "tool_namespace": "knowledge",
   "mcp_endpoint": "https://knowledge-ops.magicunicorn.dev/mcp",
   "rest_base": "https://knowledge-ops.magicunicorn.dev",
@@ -37,7 +37,7 @@
         "properties": {
           "query": {"type": "string"},
           "scope": {"type": "string", "enum": ["global", "personal", "all"], "description": "RLS scope filter; omit for default."},
-          "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of org_memory|wiki|file_index|qdrant|falkordb|center_deep."},
+          "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of org_memory|wiki|file_index|qdrant|qdrant:<collection>|falkordb|falkordb:<graph>|center_deep|rest:<name>|postgres:<name>."},
           "k": {"type": "integer", "default": 8}
         },
         "required": ["query"]

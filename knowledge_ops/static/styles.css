@@ -188,6 +188,8 @@ label.lbl { display: block; margin: 0 0 0.3rem; font-size: 0.78rem; font-weight:
 .src-file_index { background: #ffd166; }
 .src-org_memory { background: #ff9ed8; }
 .src-center_deep { background: #9fb0c7; }
+.src-rest { background: #c3f56e; }
+.src-postgres { background: #f0a354; }
 .src-other { background: #b9abc8; }
 
 /* ---------- Citations ---------- */

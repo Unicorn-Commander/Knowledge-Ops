@@ -35,6 +35,7 @@
       <button class="side__btn" data-view="files"><span class="ico">⌕</span> Files</button>
       <button class="side__btn" data-view="metrics"><span class="ico">◷</span> Metrics</button>
       <button class="side__btn" data-view="sources"><span class="ico">⛓</span> Sources</button>
+      <button class="side__btn" data-view="help"><span class="ico">?</span> Help</button>
       <div class="side__hint">
         Storage-opaque federation across wiki, file index, Qdrant, FalkorDB &amp; org memory. Every answer is scoped and cited.
       </div>
@@ -159,6 +160,47 @@
         <h2 class="section">Endpoints</h2>
         <div class="card">
           <div class="list" id="endpointsList"></div>
+        </div>
+      </section>
+
+      <!-- ============ HELP ============ -->
+      <section class="view" id="view-help">
+        <p class="kicker">? Help</p>
+        <h1 class="title">Use the <span class="grad">library</span></h1>
+        <p class="lede">Knowledge-Ops is the cited retrieval layer for humans, apps, and Brigade agents. It federates stores without making callers know where the evidence lives.</p>
+
+        <div class="grid grid--2" style="align-items:start;">
+          <div class="card">
+            <h2 class="section" style="margin-top:0;">Ask / Ground</h2>
+            <div class="md">
+              <p><strong>Ground</strong> is for claims and questions that need evidence. It returns a verdict, a short summary, and citations.</p>
+              <p><strong>Search</strong> is for raw retrieval. Use source filters through the API when you need a specific store.</p>
+              <p>Scopes are enforced after retrieval: <code>global</code>, <code>personal</code>, or <code>all</code> for admin use.</p>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="section" style="margin-top:0;">Wiki</h2>
+            <div class="md">
+              <p>The wiki is the native curated markdown store. Edits are versioned, indexed, and immediately available to grounding.</p>
+              <p>Use it for canonical operating notes, product facts, brand facts, runbooks, and decisions that agents must cite.</p>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="section" style="margin-top:0;">Federation</h2>
+            <div class="md">
+              <p>Native stores live inside Knowledge-Ops: wiki, file index, metrics, and local org-memory JSONL.</p>
+              <p>Federated stores stay owned by their apps: Qdrant collections, FalkorDB graphs, REST APIs, and read-only Postgres adapters.</p>
+              <p>Adapters are read-only by design. Write paths stay with the owning app unless a Knowledge-Ops wiki tool is explicitly used.</p>
+            </div>
+          </div>
+          <div class="card">
+            <h2 class="section" style="margin-top:0;">MCP / REST</h2>
+            <div class="md">
+              <p>Agents consume <code>/mcp</code> through the Brigade broker with namespace <code>knowledge</code>.</p>
+              <p>Primary tools: <code>search</code>, <code>ground</code>, <code>list_sources</code>, <code>get_doc</code>, <code>list_docs</code>, <code>doc_history</code>, <code>find_file</code>, <code>deep_read</code>, <code>upsert_doc</code>, and <code>record_metric</code>.</p>
+              <p>Developers can use REST directly at <code>/kb.search</code>, <code>/kb.ground</code>, and the other <code>/kb.*</code> routes.</p>
+            </div>
+          </div>
         </div>
       </section>
     </main>
