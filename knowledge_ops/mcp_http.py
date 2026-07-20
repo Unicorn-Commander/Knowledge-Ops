@@ -29,10 +29,11 @@ from .authorization import (
     filter_passages,
     require_tool_principal,
 )
+from .citations import inspect_citation
 from .file_index import deep_read, find_file
 from .metrics import record_metric
 from .storage import record_audit
-from .wiki import get_doc, history, list_docs, upsert_doc
+from .wiki import get_doc, history, list_docs, tombstone_doc, upsert_doc
 
 logger = logging.getLogger("knowledge_ops.mcp")
 
@@ -43,13 +44,17 @@ _MANIFEST_PATH = Path(__file__).resolve().parent.parent / ".well-known" / "mcps.
 # ---- tool handlers: thin adapters over the same logic the REST routes use ----
 async def _t_search(a: dict, principal: Principal) -> dict:
     res = await federation.search(
-        a["query"], scope=a.get("scope"), sources=a.get("sources"), k=int(a.get("k", 8)), principal=principal
+        a["query"], scope=a.get("scope"), sources=a.get("sources"),
+        k=int(a.get("k", 8)), principal=principal, as_of=a.get("as_of"),
     )
     return {"answer": res.answer, "passages": [p.__dict__ for p in res.passages]}
 
 
 async def _t_ground(a: dict, principal: Principal) -> dict:
-    return await federation.ground(a["query"], scope=a.get("scope"), k=int(a.get("k", 8)), principal=principal)
+    return await federation.ground(
+        a["query"], scope=a.get("scope"), sources=a.get("sources"),
+        k=int(a.get("k", 8)), principal=principal, as_of=a.get("as_of"),
+    )
 
 
 def _t_list_sources(a: dict, principal: Principal) -> dict:
@@ -91,9 +96,23 @@ def _t_deep_read(a: dict, principal: Principal) -> dict:
 
 def _t_upsert_doc(a: dict, principal: Principal) -> dict:
     scope, owner = authorized_write_target(principal, a.get("scope"), a.get("owner"))
-    doc_id = upsert_doc(a["path"], a["md"], scope, owner)
+    doc_id = upsert_doc(
+        a["path"], a["md"], scope, owner, valid_from=a.get("valid_from"),
+        valid_until=a.get("valid_until"), supersedes_id=a.get("supersedes_id"),
+        review_due_at=a.get("review_due_at"),
+    )
     record_audit(principal.subject, "mcp.wiki.upsert", doc_id, "success", {"scope": scope})
     return {"id": doc_id}
+
+
+def _t_inspect_citation(a: dict, principal: Principal) -> dict:
+    return {"citation": inspect_citation(
+        source=a["source"], source_id=a["source_id"], claim=a["claim"], principal=principal,
+    )}
+
+
+def _t_delete_doc(a: dict, principal: Principal) -> dict:
+    return {"deletion": tombstone_doc(a["id"], principal=principal, reason=a["reason"])}
 
 
 def _t_record_metric(a: dict, principal: Principal) -> dict:
@@ -114,6 +133,8 @@ _HANDLERS: dict[str, Callable[[dict, Principal], Any | Awaitable[Any]]] = {
     "find_file": _t_find_file,
     "deep_read": _t_deep_read,
     "upsert_doc": _t_upsert_doc,
+    "inspect_citation": _t_inspect_citation,
+    "delete_doc": _t_delete_doc,
     "record_metric": _t_record_metric,
 }
 
@@ -198,7 +219,7 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
         return 200, _rpc_result(req_id, {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "knowledge-ops", "version": "0.1.0"},
+            "serverInfo": {"name": "knowledge-ops", "version": "0.3.0"},
         })
     if method in ("notifications/initialized", "notifications/cancelled"):
         return 202, None

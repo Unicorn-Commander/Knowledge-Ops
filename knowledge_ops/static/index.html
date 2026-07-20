@@ -119,6 +119,14 @@
             <div class="empty">Select an import.</div>
           </div>
         </div>
+        <div class="section-row">
+          <div>
+            <p class="kicker">Memory quality</p>
+            <h2 class="section section--flush">Staleness and conflicts</h2>
+          </div>
+          <button type="button" class="btn btn--sm" id="memoryScanBtn">Scan now</button>
+        </div>
+        <div class="list" id="memoryReviewList"><div class="loading"><span class="spinner"></span> loading...</div></div>
       </section>
 
       <!-- ============ FILES ============ -->
@@ -156,6 +164,24 @@
           </div>
         </div>
         <div id="metricResult" style="margin-top: 1.2rem;"></div>
+        <div class="section-row">
+          <div>
+            <p class="kicker">Refresh</p>
+            <h2 class="section section--flush">Jobs and runs</h2>
+          </div>
+          <button type="button" class="btn btn--sm" id="refreshDueBtn">Run due</button>
+        </div>
+        <div class="ops-form">
+          <div><label class="lbl" for="refreshJobId">Job ID</label><input class="input mono" id="refreshJobId" value="wiki-review" /></div>
+          <div><label class="lbl" for="refreshKind">Kind</label><select class="select" id="refreshKind"><option value="review_scan">Review scan</option><option value="connector_refresh">Connector refresh</option></select></div>
+          <div><label class="lbl" for="refreshSource">Source</label><input class="input mono" id="refreshSource" value="wiki" /></div>
+          <div><label class="lbl" for="refreshInterval">Interval (seconds)</label><input class="input" id="refreshInterval" type="number" min="60" max="31536000" step="60" value="86400" /></div>
+          <button type="button" class="btn btn--primary ops-form__action" id="refreshSaveBtn">Save job</button>
+        </div>
+        <div class="grid grid--2 ops-grid">
+          <div><h3 class="subhead">Jobs</h3><div class="list" id="refreshJobs"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
+          <div><h3 class="subhead">Recent runs</h3><div class="list" id="refreshRuns"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
+        </div>
         <h2 class="section">Recent changes</h2>
         <div class="list" id="auditResult"><div class="loading"><span class="spinner"></span> loading...</div></div>
       </section>
@@ -180,6 +206,17 @@
     <span>Magic Unicorn · Knowledge-Ops <span id="versionTag" class="dim"></span></span>
     <span><a href="/ready">service readiness</a></span>
   </footer>
+
+  <dialog class="citation-dialog" id="citationDialog" aria-labelledby="citationTitle">
+    <div class="dialog__head">
+      <div>
+        <p class="kicker">Source span</p>
+        <h2 class="section section--flush" id="citationTitle">Citation inspection</h2>
+      </div>
+      <button type="button" class="dialog__close" id="citationClose" aria-label="Close citation inspection">×</button>
+    </div>
+    <div id="citationContent" aria-live="polite"></div>
+  </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>

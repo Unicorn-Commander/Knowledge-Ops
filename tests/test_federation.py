@@ -11,8 +11,6 @@ import asyncio
 import json
 from pathlib import Path
 
-import pytest
-
 MANIFEST = Path(__file__).resolve().parent.parent / ".well-known" / "mcps.json"
 
 

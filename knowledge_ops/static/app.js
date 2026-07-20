@@ -98,14 +98,14 @@ function showView(name) {
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   if (name === "wiki") loadWiki();
-  if (name === "review") loadReview();
+  if (name === "review") { loadReview(); loadMemoryReview(); }
   if (name === "sources") loadSources();
-  if (name === "metrics") loadAudit();
+  if (name === "metrics") loadOperations();
 }
 $$(".side__btn").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
 
 /* ============ ASK / GROUND ============ */
-function passageCard(p, i) {
+function passageCard(p, i, claim = "") {
   const sc = srcClass(p.source);
   const owner = p.owner ? `owner=${esc(p.owner)}` : "";
   const scope = p.scope ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : "";
@@ -113,6 +113,8 @@ function passageCard(p, i) {
   const text = esc(p.text || "");
   const relation = p.metadata && p.metadata.evidence_relation
     ? `<span class="pill">${esc(String(p.metadata.evidence_relation).replaceAll("_", " "))}</span>` : "";
+  const inspect = ["wiki", "file_index"].includes(p.source)
+    ? `<button type="button" class="btn btn--sm cite__inspect" data-source="${esc(p.source)}" data-source-id="${esc(p.source_id)}" data-claim="${esc(claim)}">Inspect source</button>` : "";
   return `<div class="cite">
     <div class="cite__head">
       <span class="cite__n">${i}</span>
@@ -124,9 +126,60 @@ function passageCard(p, i) {
     </div>
     <div class="cite__text" data-full="${text.length > 480 ? '1' : ''}">${text || '<span class="dim">(no snippet)</span>'}</div>
     ${text.length > 480 ? '<button class="cite__more">Show more ▾</button>' : ''}
+    ${inspect}
     ${uri}
   </div>`;
 }
+
+function renderHighlightedExcerpt(excerpt, ranges) {
+  const points = Array.from(excerpt);
+  const valid = (ranges || []).filter(r => Number.isInteger(r.start) && Number.isInteger(r.end) && r.start >= 0 && r.end > r.start && r.end <= points.length)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  valid.forEach(range => {
+    const last = merged[merged.length - 1];
+    if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+    else merged.push({ start: range.start, end: range.end });
+  });
+  let cursor = 0, html = "";
+  merged.forEach(range => {
+    html += esc(points.slice(cursor, range.start).join(""));
+    html += `<mark>${esc(points.slice(range.start, range.end).join(""))}</mark>`;
+    cursor = range.end;
+  });
+  return html + esc(points.slice(cursor).join(""));
+}
+
+async function inspectCitation(button) {
+  const dialog = $("#citationDialog"), content = $("#citationContent");
+  content.innerHTML = `<div class="loading"><span class="spinner"></span> loading source span...</div>`;
+  dialog.showModal();
+  try {
+    const data = await apiJSON("/kb.inspect_citation", {
+      source: button.dataset.source,
+      source_id: button.dataset.sourceId,
+      claim: button.dataset.claim || "evidence",
+    });
+    const c = data.citation;
+    if (!c.inspection_available) {
+      content.innerHTML = `<div class="empty">${esc(c.reason || "Source inspection is unavailable.")}</div>`;
+      return;
+    }
+    const span = c.source_span || {};
+    content.innerHTML = `<div class="row dialog__meta"><span class="src-badge ${srcClass(c.source)}">${esc(sourceLabel(c.source))}</span><span class="pill">codepoints ${esc(span.start)}–${esc(span.end)}</span>${c.lifecycle ? `<span class="pill">${esc(c.lifecycle.state)}</span>` : ""}</div>
+      <div class="mono dialog__path">${esc(c.source_path || c.source_id)}</div>
+      <pre class="source-excerpt">${renderHighlightedExcerpt(c.excerpt || "", c.match_ranges || [])}</pre>
+      <div class="dim">Claim ${esc(c.claim_id)} · Citation ${esc(c.citation_id)}</div>`;
+  } catch (e) { content.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+function bindCitationButtons(root) {
+  $$(".cite__inspect", root).forEach(button => button.addEventListener("click", () => inspectCitation(button)));
+}
+$("#citationClose").addEventListener("click", () => $("#citationDialog").close());
+$("#citationDialog").addEventListener("click", event => {
+  if (event.target === $("#citationDialog")) $("#citationDialog").close();
+});
 
 async function doAsk() {
   const q = $("#askQuery").value.trim();
@@ -158,7 +211,7 @@ async function doAsk() {
     if (passages.length) {
       const srcs = [...new Set(passages.map(p => String(p.source).split(":")[0]))];
       html += `<h2 class="section">Evidence <span class="dim">· ${passages.length} passage${passages.length === 1 ? '' : 's'} from ${srcs.length} source${srcs.length === 1 ? '' : 's'}</span></h2>`;
-      html += `<div class="card">${passages.map((p, i) => passageCard(p, i + 1)).join("")}</div>`;
+      html += `<div class="card">${passages.map((p, i) => passageCard(p, i + 1, q)).join("")}</div>`;
     } else {
       html += `<div class="empty">No accessible evidence found.</div>`;
     }
@@ -167,6 +220,7 @@ async function doAsk() {
       const t = btn.previousElementSibling; t.classList.toggle("expanded");
       btn.textContent = t.classList.contains("expanded") ? "Show less ▴" : "Show more ▾";
     }));
+    bindCitationButtons(box);
   } catch (e) {
     box.innerHTML = `<div class="error">${esc(e.message)}</div>`;
   } finally {
@@ -197,7 +251,7 @@ function renderWikiList() {
     const it = el("button", "item");
     it.type = "button";
     it.innerHTML = `<div style="min-width:0;"><div class="item__title">${esc(d.title || d.path)}</div><div class="item__sub mono">${esc(d.path)}</div></div>
-      <div class="item__meta"><span class="pill pill--scope">${esc(d.scope || "global")}</span></div>`;
+      <div class="item__meta"><span class="pill pill--scope">${esc(d.scope || "global")}</span><span class="pill ${d.lifecycle_state === 'active' ? 'pill--ok' : 'pill--off'}">${esc(d.lifecycle_state || "active")}</span></div>`;
     it.addEventListener("click", () => viewDoc(d.id));
     list.appendChild(it);
   });
@@ -213,34 +267,58 @@ async function viewDoc(id) {
     pane.dataset.docId = doc.id;
     const provenance = doc.provenance
       ? `<span class="pill">source: ${esc(doc.provenance.source_type)}</span><span class="pill">reviewed ${fmtTime(doc.provenance.reviewed_at)}</span>` : "";
+    const lifecycle = `<span class="pill ${doc.lifecycle_state === 'active' ? 'pill--ok' : 'pill--off'}">${esc(doc.lifecycle_state || "active")}</span><span class="pill">valid ${fmtTime(doc.valid_from)}${doc.valid_until ? " to " + fmtTime(doc.valid_until) : " onward"}</span>${doc.review_due_at ? `<span class="pill">review ${fmtTime(doc.review_due_at)}</span>` : ""}`;
     pane.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:flex-start;">
         <div style="min-width:0;">
           <div class="item__sub mono">${esc(doc.path)}</div>
           <h2 class="section" style="margin:.2rem 0 .4rem;">${esc(doc.title)}</h2>
-          <div class="row"><span class="pill pill--scope">${esc(doc.scope)}</span><span class="pill">owner: ${esc(doc.owner)}</span><span class="pill dim">updated ${fmtTime(doc.updated_at)}</span>${provenance}</div>
+          <div class="row"><span class="pill pill--scope">${esc(doc.scope)}</span><span class="pill">owner: ${esc(doc.owner)}</span><span class="pill dim">updated ${fmtTime(doc.updated_at)}</span>${lifecycle}${provenance}</div>
         </div>
         <div class="row">
-          <button class="btn btn--sm" id="wikiEditBtn">Edit</button>
+          ${doc.lifecycle_state === "active" ? '<button class="btn btn--sm" id="wikiEditBtn">Edit</button>' : ''}${doc.lifecycle_state === "tombstoned" ? "" : '<button class="btn btn--sm btn--danger" id="wikiDeleteBtn">Delete</button>'}
           <button class="btn btn--sm" id="wikiHistBtn">History</button>
         </div>
       </div>
       <hr class="md" style="border:none;border-top:1px solid var(--mu-color-border);margin:1rem 0;" />
       <div class="md" id="wikiBody">${renderMarkdown(doc.body)}</div>`;
-    $("#wikiEditBtn").addEventListener("click", () => editDoc(doc));
+    if ($("#wikiEditBtn")) $("#wikiEditBtn").addEventListener("click", () => editDoc(doc));
+    if ($("#wikiDeleteBtn")) $("#wikiDeleteBtn").addEventListener("click", () => deleteDoc(doc));
     $("#wikiHistBtn").addEventListener("click", () => histDoc(doc.id));
   } catch (e) { pane.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
+async function deleteDoc(doc) {
+  const reason = window.prompt(`Deletion reason for ${doc.path}:`, "Retired from governed memory");
+  if (!reason || reason.trim().length < 3) return;
+  if (!window.confirm("Delete retrievable content and all local projections? This action is recorded.")) return;
+  try {
+    const data = await apiJSON("/kb.delete_doc?id=" + encodeURIComponent(doc.id), { reason: reason.trim() });
+    toast(data.deletion.complete ? "Document deleted" : "Content deleted; projection cleanup is pending", data.deletion.complete ? "ok" : "err");
+    await loadWiki();
+    viewDoc(doc.id);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function localDateValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+function toIso(value) { return value ? new Date(value).toISOString() : undefined; }
+
 function editDoc(doc) {
   const pane = $("#wikiPane");
   const isNew = !doc;
-  doc = doc || { path: "", body: "", scope: "personal", owner: "" };
+  doc = doc || { path: "", body: "", scope: "personal", owner: "", review_due_at: "" };
   pane.innerHTML = `
     <h2 class="section" style="margin-top:0;">${isNew ? "New document" : "Edit document"}</h2>
     <div class="field"><label class="lbl">Path</label><input class="input mono" id="edPath" value="${esc(doc.path)}" placeholder="folder/title.md" ${isNew ? "" : "readonly"} /></div>
     <div class="row" style="margin-bottom:.8rem;">
       <div><label class="lbl" for="edScope">Visibility</label><select class="select" id="edScope"><option ${doc.scope==='personal'?'selected':''}>personal</option><option ${doc.scope==='global'?'selected':''}>global</option></select></div>
+      ${isNew ? '<div><label class="lbl" for="edValidFrom">Valid from</label><input class="input" id="edValidFrom" type="datetime-local" /></div><div><label class="lbl" for="edSupersedes">Supersedes ID</label><input class="input mono" id="edSupersedes" /></div>' : ''}
+      <div><label class="lbl" for="edReviewDue">Review due</label><input class="input" id="edReviewDue" type="datetime-local" value="${esc(localDateValue(doc.review_due_at))}" /></div>
     </div>
     <div class="field"><label class="lbl">Markdown</label><textarea class="textarea" id="edBody" style="min-height:280px;">${esc(doc.body)}</textarea></div>
     <div class="row"><button class="btn btn--primary" id="edSave">Save</button><button class="btn" id="edCancel">Cancel</button></div>`;
@@ -252,7 +330,12 @@ function editDoc(doc) {
     if (!md.trim()) { toast("Body is required", "err"); return; }
     $("#edSave").disabled = true;
     try {
-      const { id } = await apiJSON("/kb.upsert_doc", { path, md, scope: $("#edScope").value });
+      const payload = { path, md, scope: $("#edScope").value, review_due_at: toIso($("#edReviewDue").value) };
+      if (isNew) {
+        payload.valid_from = toIso($("#edValidFrom").value);
+        payload.supersedes_id = $("#edSupersedes").value.trim() || undefined;
+      }
+      const { id } = await apiJSON("/kb.upsert_doc", payload);
       toast("Saved", "ok");
       await loadWiki();
       viewDoc(id);
@@ -327,7 +410,44 @@ async function reviewImport(id, approve) {
     await viewImport(id);
   } catch (e) { toast(e.message, "err"); }
 }
-$("#reviewRefresh").addEventListener("click", loadReview);
+async function loadMemoryReview() {
+  const list = $("#memoryReviewList");
+  list.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.review_items?status=open&limit=200");
+    const items = data.items || [];
+    if (!items.length) { list.innerHTML = `<div class="empty">No staleness or conflict findings.</div>`; return; }
+    list.innerHTML = items.map(item => {
+      const details = item.details || {};
+      const locator = details.paths ? details.paths.join(" · ") : (details.path || item.resource_id);
+      return `<div class="item review-item"><div><div class="item__title">${esc(item.reason)}</div><div class="item__sub mono">${esc(locator)}</div></div><div class="item__meta"><span class="pill">${esc(item.kind)}</span>${item.due_at ? `<span class="pill">due ${fmtTime(item.due_at)}</span>` : ""}<button type="button" class="btn btn--sm review-resolve" data-id="${esc(item.id)}">Resolve</button></div></div>`;
+    }).join("");
+    $$(".review-resolve", list).forEach(button => button.addEventListener("click", () => resolveMemoryReview(button.dataset.id)));
+  } catch (e) { list.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+async function resolveMemoryReview(id) {
+  const note = window.prompt("Resolution note:");
+  if (!note || note.trim().length < 3) return;
+  try {
+    await apiJSON("/kb.review_resolve?id=" + encodeURIComponent(id), { note: note.trim() });
+    toast("Review item resolved", "ok");
+    loadMemoryReview();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function scanMemoryReview() {
+  $("#memoryScanBtn").disabled = true;
+  try {
+    const result = await apiJSON("/kb.review_scan", {});
+    toast(`${result.detected} findings detected`, "ok");
+    await loadMemoryReview();
+  } catch (e) { toast(e.message, "err"); }
+  finally { $("#memoryScanBtn").disabled = false; }
+}
+
+$("#reviewRefresh").addEventListener("click", () => { loadReview(); loadMemoryReview(); });
+$("#memoryScanBtn").addEventListener("click", scanMemoryReview);
 
 /* ============ FILES ============ */
 async function doFileSearch() {
@@ -357,8 +477,9 @@ async function deepRead(path, query) {
     const data = await api(`/kb.deep_read?path=${encodeURIComponent(path)}&query=${encodeURIComponent(query || "")}&k=20`);
     const ps = data.passages || [];
     box.innerHTML = `<h2 class="section">Deep read <span class="dim mono">· ${esc(path)}</span></h2>` +
-      (ps.length ? `<div class="card">${ps.map((p, i) => passageCard(p, i + 1)).join("")}</div>` : `<div class="empty">No chunks indexed for this file.</div>`);
+      (ps.length ? `<div class="card">${ps.map((p, i) => passageCard(p, i + 1, query || "")).join("")}</div>` : `<div class="empty">No chunks indexed for this file.</div>`);
     $$("#fileDeep .cite__more").forEach(btn => btn.addEventListener("click", () => { const t = btn.previousElementSibling; t.classList.toggle("expanded"); btn.textContent = t.classList.contains("expanded") ? "Show less ▴" : "Show more ▾"; }));
+    bindCitationButtons(box);
     box.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (e) { box.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
@@ -398,6 +519,56 @@ async function loadAudit() {
     box.innerHTML = events.length ? events.map(event => `<div class="item"><div><div class="item__title">${esc(event.action)}</div><div class="item__sub">${esc(event.actor)} · ${esc(event.resource)}</div></div><div class="item__meta"><span class="pill ${event.outcome === 'success' || event.outcome === 'approved' ? 'pill--ok' : ''}">${esc(event.outcome)}</span><span class="dim">${fmtTime(event.recorded_at)}</span></div></div>`).join("") : `<div class="empty">No recorded changes.</div>`;
   } catch (e) { box.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
+
+async function loadRefreshOperations() {
+  const jobsBox = $("#refreshJobs"), runsBox = $("#refreshRuns");
+  jobsBox.innerHTML = runsBox.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.refresh_jobs");
+    const jobs = data.jobs || [], runs = data.runs || [];
+    jobsBox.innerHTML = jobs.length ? jobs.map(job => `<div class="item"><div><div class="item__title">${esc(job.job_id)}</div><div class="item__sub mono">${esc(job.kind)} · ${esc(job.source_ref)}</div></div><div class="item__meta"><span class="pill ${job.enabled ? 'pill--ok' : 'pill--off'}">${job.enabled ? 'enabled' : 'paused'}</span><span class="pill">${esc(job.interval_seconds)}s</span></div></div>`).join("") : `<div class="empty">No refresh jobs.</div>`;
+    runsBox.innerHTML = runs.length ? runs.map(run => `<div class="item"><div><div class="item__title">${esc(run.job_id)}</div><div class="item__sub mono">${esc(run.run_id)}</div></div><div class="item__meta"><span class="pill run--${esc(run.status)}">${esc(run.status)}</span><span class="dim">${fmtTime(run.scheduled_for)}</span></div></div>`).join("") : `<div class="empty">No refresh runs.</div>`;
+  } catch (e) {
+    const error = `<div class="error">${esc(e.message)}</div>`;
+    jobsBox.innerHTML = error; runsBox.innerHTML = error;
+  }
+}
+
+async function saveRefreshJob() {
+  const payload = {
+    job_id: $("#refreshJobId").value.trim(),
+    kind: $("#refreshKind").value,
+    source_ref: $("#refreshSource").value.trim(),
+    interval_seconds: Number($("#refreshInterval").value),
+    enabled: true,
+  };
+  $("#refreshSaveBtn").disabled = true;
+  try {
+    await apiJSON("/kb.refresh_job", payload);
+    toast("Refresh job saved", "ok");
+    loadRefreshOperations();
+  } catch (e) { toast(e.message, "err"); }
+  finally { $("#refreshSaveBtn").disabled = false; }
+}
+
+async function runDueRefresh() {
+  $("#refreshDueBtn").disabled = true;
+  try {
+    const data = await api("/kb.refresh_due", { method: "POST" });
+    toast(`${(data.runs || []).length} due runs dispatched`, "ok");
+    await loadRefreshOperations();
+    loadAudit();
+  } catch (e) { toast(e.message, "err"); }
+  finally { $("#refreshDueBtn").disabled = false; }
+}
+
+function loadOperations() {
+  loadRefreshOperations();
+  loadAudit();
+}
+
+$("#refreshSaveBtn").addEventListener("click", saveRefreshJob);
+$("#refreshDueBtn").addEventListener("click", runDueRefresh);
 
 /* ============ SOURCES / STATUS ============ */
 async function loadSources() {

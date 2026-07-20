@@ -20,10 +20,15 @@ def tokenize(text: str) -> list[str]:
 
 
 def chunk_text(text: str, max_chars: int = 1400, overlap: int = 180) -> list[str]:
-    text = re.sub(r"\n{3,}", "\n\n", text or "").strip()
+    return [chunk for chunk, _, _ in chunk_text_with_spans(text, max_chars=max_chars, overlap=overlap)]
+
+
+def chunk_text_with_spans(text: str, max_chars: int = 1400, overlap: int = 180) -> list[tuple[str, int, int]]:
+    """Chunk text while retaining exact character offsets into the source."""
+    text = text or ""
     if not text:
         return []
-    chunks: list[str] = []
+    chunks: list[tuple[str, int, int]] = []
     start = 0
     while start < len(text):
         end = min(len(text), start + max_chars)
@@ -31,11 +36,17 @@ def chunk_text(text: str, max_chars: int = 1400, overlap: int = 180) -> list[str
             split = max(text.rfind("\n\n", start, end), text.rfind(". ", start, end))
             if split > start + max_chars // 2:
                 end = split + 1
-        chunks.append(text[start:end].strip())
+        raw = text[start:end]
+        leading = len(raw) - len(raw.lstrip())
+        trailing = len(raw) - len(raw.rstrip())
+        span_start = start + leading
+        span_end = end - trailing
+        if span_end > span_start:
+            chunks.append((text[span_start:span_end], span_start, span_end))
         if end >= len(text):
             break
         start = max(0, end - overlap)
-    return [c for c in chunks if c]
+    return chunks
 
 
 def read_text_file(path: Path) -> str:

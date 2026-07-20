@@ -9,23 +9,36 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 from . import federation
 from .authorization import authorized_write_target, filter_passages, system_principal
+from .citations import inspect_citation
 from .file_index import deep_read, find_file
 from .metrics import record_metric, render_metric_chart
-from .wiki import get_doc, history, list_docs, upsert_doc
+from .wiki import get_doc, history, list_docs, tombstone_doc, upsert_doc
 
 mcp = FastMCP("knowledge_ops")
 _LOCAL = system_principal()
 
 
 @mcp.tool(name="kb.search")
-def kb_search(query: str, scope: str = "", sources: list[str] | None = None, k: int = 8) -> dict:
-    res = asyncio.run(federation.search(query, scope=scope or None, sources=sources, k=k, principal=_LOCAL))
+def kb_search(
+    query: str, scope: str = "", sources: list[str] | None = None,
+    k: int = 8, as_of: str = "",
+) -> dict:
+    res = asyncio.run(federation.search(
+        query, scope=scope or None, sources=sources, k=k,
+        principal=_LOCAL, as_of=as_of or None,
+    ))
     return {"answer": res.answer, "passages": [p.__dict__ for p in res.passages]}
 
 
 @mcp.tool(name="kb.ground")
-def kb_ground(claim: str, scope: str = "", k: int = 8) -> dict:
-    return asyncio.run(federation.ground(claim, scope=scope or None, k=k, principal=_LOCAL))
+def kb_ground(
+    claim: str, scope: str = "", sources: list[str] | None = None,
+    k: int = 8, as_of: str = "",
+) -> dict:
+    return asyncio.run(federation.ground(
+        claim, scope=scope or None, sources=sources, k=k,
+        principal=_LOCAL, as_of=as_of or None,
+    ))
 
 
 @mcp.tool(name="kb.list_sources")
@@ -39,9 +52,29 @@ def kb_get_doc(id: str) -> dict:
 
 
 @mcp.tool(name="kb.upsert_doc")
-def kb_upsert_doc(path: str, md: str, scope: str = "personal", owner: str = "") -> dict:
+def kb_upsert_doc(
+    path: str, md: str, scope: str = "personal", owner: str = "",
+    valid_from: str = "", valid_until: str = "", supersedes_id: str = "",
+    review_due_at: str = "",
+) -> dict:
     target_scope, target_owner = authorized_write_target(_LOCAL, scope, owner)
-    return {"id": upsert_doc(path, md, target_scope, target_owner)}
+    return {"id": upsert_doc(
+        path, md, target_scope, target_owner, valid_from=valid_from or None,
+        valid_until=valid_until or None, supersedes_id=supersedes_id or None,
+        review_due_at=review_due_at or None,
+    )}
+
+
+@mcp.tool(name="kb.inspect_citation")
+def kb_inspect_citation(source: str, source_id: str, claim: str) -> dict:
+    return {"citation": inspect_citation(
+        source=source, source_id=source_id, claim=claim, principal=_LOCAL,
+    )}
+
+
+@mcp.tool(name="kb.delete_doc")
+def kb_delete_doc(id: str, reason: str) -> dict:
+    return {"deletion": tombstone_doc(id, principal=_LOCAL, reason=reason)}
 
 
 @mcp.tool(name="kb.list_docs")

@@ -1,4 +1,4 @@
-# Knowledge-Ops v0
+# Knowledge-Ops v0.3
 
 Knowledge-Ops is the Magic Unicorn governed evidence and memory layer. Agents call `kb.search` or `kb.ground`; the service decides which stores to query, merges authorized evidence, and returns cited passages with explicitly heuristic relationship labels.
 
@@ -19,11 +19,13 @@ All embedding config is centralized in `knowledge_ops/config.py` and defaults to
 
 MCP tool names mirror the requested interface:
 
-- `kb.search(query, scope?, sources?, k?)`
-- `kb.ground(claim, scope?, k?)`
+- `kb.search(query, scope?, sources?, k?, as_of?)`
+- `kb.ground(claim, scope?, sources?, k?, as_of?)`
 - `kb.list_sources()`
 - `kb.get_doc(id)`
-- `kb.upsert_doc(path, md)`
+- `kb.upsert_doc(path, md, validity?, supersedes_id?, review_due_at?)`
+- `kb.inspect_citation(source, source_id, claim)`
+- `kb.delete_doc(id, reason)`
 - `kb.list_docs()`
 - `kb.doc_history(id)`
 - `kb.record_metric(name, value, tags)`
@@ -60,12 +62,14 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | POST | `/mcp` | **HTTP-MCP JSON-RPC** (`initialize`/`tools/list`/`tools/call`) for the Brigade broker |
 | GET  | `/.well-known/mcps.json` | Brigade federation manifest |
 | GET  | `/docs` | OpenAPI / Swagger |
-| POST | `/kb.search` | body: `{query, scope?, sources?, k?}` |
-| POST | `/kb.ground` | body: `{query, scope?, k?}` → verdict + grounded answer + cited passages |
+| POST | `/kb.search` | body: `{query, scope?, sources?, k?, as_of?}` |
+| POST | `/kb.ground` | body: `{query, scope?, sources?, k?, as_of?}` → heuristic verdict + cited evidence excerpts |
 | GET  | `/kb.list_sources` | source catalog + enabled/disabled status |
 | GET  | `/kb.docs` | list wiki docs |
 | GET  | `/kb.get_doc?id=...` | one wiki doc |
-| POST | `/kb.upsert_doc` | body: `{path, md, scope?, owner?}` |
+| POST | `/kb.upsert_doc` | body: `{path, md, scope?, owner?, valid_from?, valid_until?, supersedes_id?, review_due_at?}` |
+| POST | `/kb.inspect_citation` | body: `{source, source_id, claim}` → authorized exact source span |
+| POST | `/kb.delete_doc?id=...` | body: `{reason}` → durable tombstone + projection status |
 | GET  | `/kb.doc_history?id=...` | wiki versions |
 | POST | `/kb.ingest_marketing_docs` | re-ingest the brand bible from `~/Documents` |
 | POST | `/kb.record_metric` | body: `{name, value, tags?}` |
@@ -74,6 +78,8 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | POST | `/kb.index_files?root=...&limit=...` | index a directory tree |
 | GET  | `/kb.find_file?query=...&k=...&scope=...` | file search |
 | GET  | `/kb.deep_read?path=...&query=...` | all chunks of one file |
+| GET/POST | `/kb.review_items`, `/kb.review_scan`, `/kb.review_resolve` | administrator memory-quality queue |
+| GET/POST | `/kb.refresh_jobs`, `/kb.refresh_job`, `/kb.refresh_run`, `/kb.refresh_due`, `/kb.refresh_complete` | administrator refresh contracts |
 
 Verified grounded call (returns evidence + citations):
 
@@ -81,10 +87,10 @@ Verified grounded call (returns evidence + citations):
 curl -s -X POST http://127.0.0.1:8765/kb.ground \
   -H "Content-Type: application/json" \
   -d '{"query":"What is Magic Unicorn?","scope":"global","k":6}'
-# => {"claim":"What is Magic Unicorn?","verdict":"evidence_found",
-#     "answer":"Grounded summary: Magic Unicorn builds **sovereign AI you actually own** ...
-#               Citations:\n[1] wiki:Magic Unicorn — Marketing & Brand Bible (v1) ...",
-#     "passages":[ ... cited Passage objects ... ]}
+# => {"claim":"What is Magic Unicorn?","verdict":"related_evidence",
+#     "verification_status":"heuristic_not_verified",
+#     "answer":"Evidence excerpts (not a generated factual conclusion): ...",
+#     "passages":[ ... claim-linked Passage objects ... ]}
 ```
 
 ## Web GUI
@@ -92,10 +98,10 @@ curl -s -X POST http://127.0.0.1:8765/kb.ground \
 The FastAPI app serves its own single-page GUI at **`/ui/`** (static files under
 `knowledge_ops/static/`, vanilla JS — no build step, no CDN). `/` redirects there.
 On-brand Magic Unicorn (dark + purple/gradient, tokens from `magic-unicorn-ui`).
-Sections: **Ask/Ground** (hero — cited answers with source/scope/owner clearly
-attributed), **Wiki** (list/view/edit/history), **Files** (find + deep-read),
-**Metrics** (SVG charts), **Sources/Status** (federated sources + the registered
-MCP tools from the manifest).
+Sections: **Ask/Ground** (cited excerpts and exact source-span inspection),
+**Library** (lifecycle-aware list/view/edit/history/deletion), **Review**
+(OpenWiki plus stale/conflict queues), **Files** (find + deep-read), **Operations**
+(metrics, audit, refresh jobs), and **Sources** (federation plus MCP tools).
 
 ## HTTP-MCP (`POST /mcp`)
 
@@ -230,3 +236,7 @@ specific elevated scopes. Missing source classification is `restricted`.
 OpenWiki 0.1.0 is pinned as an untrusted producer. Its immutable staging,
 OKF/security gates, and review-before-canonical contract are in
 `docs/OPENWIKI-GOVERNANCE.md`.
+
+Temporal validity, supersession, convergent deletion, quality queues, refresh
+contracts, citation inspection, and the offline evaluation gate are specified in
+`docs/MEMORY-LIFECYCLE.md`.

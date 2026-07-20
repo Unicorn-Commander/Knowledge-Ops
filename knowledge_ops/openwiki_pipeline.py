@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 import re
 import shutil
+import os
+import tempfile
 from typing import Any
 
 import yaml
@@ -144,6 +146,11 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
     init_db()
     with connect() as db:
         existing = db.execute("SELECT * FROM openwiki_imports WHERE import_id=?", (import_id,)).fetchone()
+        tombstoned_paths = {
+            str(row["path"]) for row in db.execute(
+                "SELECT path FROM wiki_docs WHERE lifecycle_state='tombstoned'"
+            )
+        }
     if existing:
         return get_import(import_id, principal)
 
@@ -155,6 +162,12 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
     try:
         for source_file in files:
             rel = source_file.relative_to(source).as_posix()
+            if f"openwiki/{rel}" in tombstoned_paths:
+                findings.append(Finding(
+                    rel, "deletion", "blocking",
+                    "canonical path is tombstoned and cannot be restaged",
+                ))
+                continue
             text = source_file.read_text(encoding="utf-8", errors="strict")
             try:
                 metadata, _ = _frontmatter(text)
@@ -219,6 +232,7 @@ def list_imports(principal: Principal) -> list[dict[str, Any]]:
     with connect() as db:
         rows = db.execute(
             """SELECT import_id, producer_version, source_digest, state, document_count,
+                      deleted_document_count,
                       findings_json, staged_by, staged_at, reviewed_by, reviewed_at, review_note
                FROM openwiki_imports ORDER BY staged_at DESC"""
         ).fetchall()
@@ -261,6 +275,67 @@ def _verified_manifest(import_id: str) -> tuple[dict[str, Any], Path]:
         if hashlib.sha256(path.read_bytes()).hexdigest() != doc["sha256"]:
             raise ValueError("staging snapshot has changed since validation")
     return manifest, base
+
+
+def purge_staging_reference(import_id: str, source_id: str) -> bool:
+    """Remove deleted source content and its manifest reference from staging.
+
+    Approved snapshots are otherwise immutable. A governed tombstone is the
+    deliberate exception: retaining the staged plaintext would defeat deletion.
+    """
+    init_db()
+    base = (settings.openwiki_staging_dir / import_id).resolve()
+    if not base.is_relative_to(settings.openwiki_staging_dir.resolve()):
+        raise ValueError("invalid OpenWiki import id")
+    manifest_path = base / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("import_id") != import_id:
+        raise ValueError("staging manifest identity mismatch")
+    document = next((item for item in manifest.get("documents", []) if item.get("path") == source_id), None)
+    target = (base / "documents" / source_id).resolve()
+    if not target.is_relative_to((base / "documents").resolve()):
+        raise ValueError("staging document escapes snapshot")
+    deleted = {str(item) for item in manifest.get("deleted_documents", [])}
+    if not document and source_id not in deleted:
+        return False
+    remaining = [item for item in manifest.get("documents", []) if item.get("path") != source_id]
+    manifest["documents"] = remaining
+    deleted.add(source_id)
+    manifest["deleted_documents"] = sorted(deleted)
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".manifest.", suffix=".tmp", dir=base)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(tmp_name).chmod(0o440)
+        target.unlink(missing_ok=True)
+        os.replace(tmp_name, manifest_path)
+    finally:
+        Path(tmp_name).unlink(missing_ok=True)
+    with connect() as db:
+        db.execute(
+            """UPDATE openwiki_imports SET document_count=?,
+               deleted_document_count=? WHERE import_id=?""",
+            (len(remaining), len(deleted), import_id),
+        )
+    return True
+
+
+def purge_staging_references(source_id: str) -> dict[str, Any]:
+    """Convergently purge one OpenWiki source from every retained snapshot."""
+    init_db()
+    with connect() as db:
+        import_ids = [str(row["import_id"]) for row in db.execute(
+            "SELECT import_id FROM openwiki_imports ORDER BY staged_at"
+        )]
+    purged = 0
+    for import_id in import_ids:
+        if purge_staging_reference(import_id, source_id):
+            purged += 1
+    return {"source_id": source_id, "snapshots_purged": purged, "complete": True}
 
 
 def approve_import(import_id: str, principal: Principal, note: str, *, accept_pii: bool = False) -> dict[str, Any]:

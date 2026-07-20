@@ -9,7 +9,7 @@ from .config import settings
 from .authorization import Principal, sqlite_visibility_clause
 from .models import Passage
 from .storage import connect, init_db, now
-from .text import chunk_text, lexical_score, read_text_file, stable_id
+from .text import chunk_text_with_spans, lexical_score, read_text_file, stable_id
 
 TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".ts", ".tsx", ".js", ".jsx", ".html", ".css", ".sql", ".toml"}
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build"}
@@ -83,14 +83,19 @@ def index_root(root: Path, scope: str = "personal", owner: str = "", limit: int 
                 continue
             db.execute("DELETE FROM file_fts WHERE chunk_id IN (SELECT id FROM file_chunks WHERE path=?)", (str(path),))
             db.execute("DELETE FROM file_chunks WHERE path=?", (str(path),))
-            for idx, chunk in enumerate(chunk_text(text)):
+            for idx, (chunk, span_start, span_end) in enumerate(chunk_text_with_spans(text)):
                 cid = stable_id(f"file:{host}:{path}:{idx}:{digest}")
                 db.execute(
                     """
-                    INSERT INTO file_chunks(id, host, path, mtime, sha1, chunk_index, text, scope, owner, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO file_chunks(
+                      id, host, path, mtime, sha1, chunk_index, text, scope, owner,
+                      updated_at, span_start, span_end
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (cid, host, str(path), stat.st_mtime, digest, idx, chunk, scope, owner, now()),
+                    (
+                        cid, host, str(path), stat.st_mtime, digest, idx, chunk, scope,
+                        owner, now(), span_start, span_end,
+                    ),
                 )
                 db.execute("INSERT INTO file_fts(chunk_id, path, text) VALUES (?, ?, ?)", (cid, str(path), chunk))
                 count += 1
@@ -116,7 +121,13 @@ def find_file(query: str, k: int = 8, scope: str | None = None, *, principal: Pr
             scope=r["scope"],
             owner=r["owner"],
             uri=r["path"],
-            metadata={"path": r["path"], "host": r["host"], "chunk_index": r["chunk_index"]},
+            metadata={
+                "path": r["path"], "host": r["host"], "chunk_index": r["chunk_index"],
+                "source_span": {
+                    "start": r["span_start"], "end": r["span_end"],
+                    "unit": "unicode_codepoint",
+                },
+            },
         )
         prev = best_by_path.get(r["path"])
         if not prev or hit.score > prev.score:
@@ -144,6 +155,12 @@ def deep_read(path: str, query: str = "", k: int = 8, *, principal: Principal) -
             scope=r["scope"],
             owner=r["owner"],
             uri=r["path"],
-            metadata={"path": r["path"], "host": r["host"], "chunk_index": r["chunk_index"]},
+            metadata={
+                "path": r["path"], "host": r["host"], "chunk_index": r["chunk_index"],
+                "source_span": {
+                    "start": r["span_start"], "end": r["span_end"],
+                    "unit": "unicode_codepoint",
+                },
+            },
         ))
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]

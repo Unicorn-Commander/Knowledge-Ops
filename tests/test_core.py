@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from knowledge_ops.metrics import record_metric, render_metric_chart
 from knowledge_ops.text import chunk_text, lexical_score
 from knowledge_ops.wiki import search_wiki, upsert_doc

@@ -22,12 +22,34 @@ from .authorization import (
     principal_from_authorization,
 )
 from .config import settings
+from .citations import inspect_citation
 from .file_index import deep_read, find_file, index_root
 from .http_middleware import RequestGuardMiddleware
 from .metrics import metric_rows, record_metric, render_metric_chart
+from .memory_quality import (
+    complete_refresh_run,
+    list_refresh_jobs,
+    list_refresh_runs,
+    list_review_items,
+    resolve_review_item,
+    run_due_refresh_jobs,
+    run_refresh_job,
+    scan_review_queue,
+    upsert_refresh_job,
+)
 from .openwiki_pipeline import approve_import, get_import, list_imports, reject_import, stage_bundle
 from .storage import audit_rows, connect, init_db, record_audit
-from .wiki import get_doc, history, ingest_marketing_docs, list_docs, seed_wiki_from_disk, sync_wiki_to_disk, upsert_doc
+from .wiki import (
+    get_doc,
+    history,
+    ingest_marketing_docs,
+    list_docs,
+    reconcile_pending_deletions,
+    seed_wiki_from_disk,
+    sync_wiki_to_disk,
+    tombstone_doc,
+    upsert_doc,
+)
 
 logger = logging.getLogger("knowledge_ops")
 
@@ -48,12 +70,15 @@ async def lifespan(app: FastAPI):
         repaired = sync_wiki_to_disk()
         if repaired:
             logger.warning("repaired %d wiki markdown projections from canonical storage", repaired)
+        deletions = reconcile_pending_deletions()
+        if deletions["pending"]:
+            logger.error("%d deletion receipts still have pending projections", deletions["pending"])
     except Exception:  # never let seeding crash startup
         logger.exception("wiki seed-on-startup failed (non-fatal)")
     yield
 
 
-app = FastAPI(title="Knowledge-Ops", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Knowledge-Ops", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     RequestGuardMiddleware,
     max_bytes=settings.max_request_bytes,
@@ -105,7 +130,7 @@ def root() -> RedirectResponse:
 def info() -> dict:
     return {
         "service": "knowledge-ops",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "ui": "/ui/",
         "docs": "/docs",
         "health": "/health",
@@ -142,6 +167,7 @@ class SearchRequest(BaseModel):
     scope: str | None = None
     sources: list[str] | None = None
     k: int = Field(default=8, ge=1, le=50)
+    as_of: str | None = Field(default=None, max_length=80)
 
 
 class DocRequest(BaseModel):
@@ -149,6 +175,43 @@ class DocRequest(BaseModel):
     md: str = Field(min_length=1, max_length=900_000)
     scope: Literal["personal", "global"] = "personal"
     owner: str | None = None
+    valid_from: str | None = Field(default=None, max_length=80)
+    valid_until: str | None = Field(default=None, max_length=80)
+    supersedes_id: str | None = Field(default=None, max_length=120)
+    review_due_at: str | None = Field(default=None, max_length=80)
+
+
+class DeleteRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class CitationInspectRequest(BaseModel):
+    source: str = Field(min_length=1, max_length=80)
+    source_id: str = Field(min_length=1, max_length=500)
+    claim: str = Field(min_length=1, max_length=10_000)
+
+
+class ReviewResolveRequest(BaseModel):
+    note: str = Field(min_length=3, max_length=2000)
+
+
+class RefreshJobRequest(BaseModel):
+    job_id: str = Field(min_length=1, max_length=120)
+    kind: Literal["review_scan", "connector_refresh"]
+    source_ref: str = Field(default="wiki", max_length=500)
+    interval_seconds: int = Field(ge=60, le=31_536_000)
+    enabled: bool = True
+
+
+class RefreshRunRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    scheduled_for: str | None = Field(default=None, max_length=80)
+
+
+class RefreshCompleteRequest(BaseModel):
+    status: Literal["completed", "failed"]
+    result: dict = Field(default_factory=dict)
+    error: str | None = Field(default=None, max_length=2000)
 
 
 class MetricRequest(BaseModel):
@@ -186,13 +249,19 @@ def ready() -> JSONResponse:
 
 @app.post("/kb.search")
 async def kb_search(req: SearchRequest, principal: ApiPrincipal) -> dict:
-    res = await federation.search(req.query, scope=req.scope, sources=req.sources, k=req.k, principal=principal)
+    res = await federation.search(
+        req.query, scope=req.scope, sources=req.sources, k=req.k,
+        principal=principal, as_of=req.as_of,
+    )
     return {"query": res.query, "answer": res.answer, "passages": [p.__dict__ for p in res.passages]}
 
 
 @app.post("/kb.ground")
 async def kb_ground(req: SearchRequest, principal: ApiPrincipal) -> dict:
-    return await federation.ground(req.query, scope=req.scope, k=req.k, principal=principal)
+    return await federation.ground(
+        req.query, scope=req.scope, k=req.k, principal=principal,
+        sources=req.sources, as_of=req.as_of,
+    )
 
 
 @app.get("/kb.list_sources")
@@ -223,9 +292,25 @@ def kb_get_doc(id: str, principal: ApiPrincipal) -> dict:
 @app.post("/kb.upsert_doc")
 def kb_upsert_doc(req: DocRequest, principal: ApiPrincipal) -> dict:
     scope, owner = authorized_write_target(principal, req.scope, req.owner)
-    doc_id = upsert_doc(req.path, req.md, scope, owner)
+    doc_id = upsert_doc(
+        req.path, req.md, scope, owner, valid_from=req.valid_from,
+        valid_until=req.valid_until, supersedes_id=req.supersedes_id,
+        review_due_at=req.review_due_at,
+    )
     record_audit(principal.subject, "wiki.upsert", doc_id, "success", {"scope": scope, "path": req.path})
     return {"id": doc_id}
+
+
+@app.post("/kb.delete_doc")
+def kb_delete_doc(id: str, req: DeleteRequest, principal: ApiPrincipal) -> dict:
+    return {"deletion": tombstone_doc(id, principal=principal, reason=req.reason)}
+
+
+@app.post("/kb.inspect_citation")
+def kb_inspect_citation(req: CitationInspectRequest, principal: ApiPrincipal) -> dict:
+    return {"citation": inspect_citation(
+        source=req.source, source_id=req.source_id, claim=req.claim, principal=principal,
+    )}
 
 
 @app.get("/kb.doc_history")
@@ -271,6 +356,85 @@ def kb_audit(principal: ApiPrincipal, limit: int = 100) -> dict:
     if not principal.is_admin:
         raise AuthorizationError("audit history requires knowledge-admin")
     return {"events": audit_rows(limit)}
+
+
+@app.get("/kb.review_items")
+def kb_review_items(
+    principal: ApiPrincipal,
+    status: Literal["open", "resolved", "all"] = "open",
+    kind: Literal["stale", "conflict"] | None = None,
+    limit: int = 200,
+) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("memory review queue requires knowledge-admin")
+    return {"items": list_review_items(status=status, kind=kind, limit=limit)}
+
+
+@app.post("/kb.review_scan")
+def kb_review_scan(principal: ApiPrincipal, at: str | None = None) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("memory review scan requires knowledge-admin")
+    result = scan_review_queue(at=at)
+    record_audit(principal.subject, "memory.review_scan", "wiki", "success", result)
+    return result
+
+
+@app.post("/kb.review_resolve")
+def kb_review_resolve(id: int, req: ReviewResolveRequest, principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("memory review resolution requires knowledge-admin")
+    item = resolve_review_item(id, actor=principal.subject, note=req.note)
+    record_audit(principal.subject, "memory.review_resolve", str(id), "success")
+    return {"item": item}
+
+
+@app.get("/kb.refresh_jobs")
+def kb_refresh_jobs(principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("refresh operations require knowledge-admin")
+    return {"jobs": list_refresh_jobs(), "runs": list_refresh_runs(limit=100)}
+
+
+@app.post("/kb.refresh_job")
+def kb_refresh_job(req: RefreshJobRequest, principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("refresh job changes require knowledge-admin")
+    job = upsert_refresh_job(
+        req.job_id, kind=req.kind, source_ref=req.source_ref,
+        interval_seconds=req.interval_seconds, enabled=req.enabled,
+    )
+    record_audit(principal.subject, "refresh.job_upsert", req.job_id, "success", {"kind": req.kind})
+    return {"job": job}
+
+
+@app.post("/kb.refresh_run")
+def kb_refresh_run(id: str, req: RefreshRunRequest, principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("refresh run dispatch requires knowledge-admin")
+    run = run_refresh_job(
+        id, actor=principal.subject, idempotency_key=req.idempotency_key,
+        scheduled_for=req.scheduled_for,
+    )
+    record_audit(principal.subject, "refresh.run", run["run_id"], run["status"], {"job_id": id})
+    return {"run": run}
+
+
+@app.post("/kb.refresh_due")
+def kb_refresh_due(principal: ApiPrincipal, at: str | None = None) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("refresh scheduler dispatch requires knowledge-admin")
+    runs = run_due_refresh_jobs(actor=principal.subject, at=at)
+    record_audit(principal.subject, "refresh.run_due", "refresh_jobs", "success", {"runs": len(runs)})
+    return {"runs": runs}
+
+
+@app.post("/kb.refresh_complete")
+def kb_refresh_complete(id: str, req: RefreshCompleteRequest, principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("refresh completion requires knowledge-admin")
+    run = complete_refresh_run(id, status=req.status, result=req.result, error=req.error)
+    record_audit(principal.subject, "refresh.complete", id, req.status)
+    return {"run": run}
 
 
 @app.post("/kb.index_files")

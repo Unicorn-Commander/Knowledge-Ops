@@ -12,6 +12,8 @@ Brokered agent surface: `/mcp` with namespace `knowledge`
 
 - Retrieves evidence with citations and conservative contradiction/abstention labels.
 - Curates canonical docs in a versioned markdown wiki.
+- Applies temporal validity, supersession, governed tombstones, and deletion propagation to native memory.
+- Queues stale or conflicting knowledge for review and records idempotent refresh runs.
 - Stages OpenWiki/OKF output behind security and human-review gates before canonical promotion.
 - Searches native and federated stores through one API.
 - Preserves app ownership: Knowledge-Ops reads external stores, it does not take over their write paths.
@@ -46,11 +48,11 @@ flowchart LR
 
 Native stores are owned by Knowledge-Ops. Federated stores remain owned by the source app. The fan-out merges and re-ranks passages, enforces identity-derived visibility, and returns cited evidence.
 
-OpenWiki is a producer outside this trust boundary. Its governed import contract is documented in [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md).
+OpenWiki is a producer outside this trust boundary. Its governed import contract is documented in [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md). Temporal, deletion, review, refresh, and evaluation semantics are documented in [Governed Memory Lifecycle](docs/MEMORY-LIFECYCLE.md).
 
 ## GUI
 
-The GUI is served directly by FastAPI at `/ui/`, with no build step. It includes Ask, Library, OpenWiki Review, Files, Sources, and Operations.
+The GUI is served directly by FastAPI at `/ui/`, with no build step. It includes Ask with source-span inspection, lifecycle-aware Library, OpenWiki and memory-quality Review, Files, Sources, and refresh-aware Operations.
 
 ![Federated sources](docs/screenshots/knowledge-ops-sources.png)
 
@@ -207,7 +209,12 @@ ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.ba
 
 ```bash
 python3 -m pytest -q
+python3 -m knowledge_ops.cli evaluate-memory
 ```
+
+The memory evaluation is deterministic, isolated, and offline. Production
+refresh execution still requires an operator-managed scheduler and credentialed
+connector workers; Knowledge-Ops stores only credential-free job contracts.
 
 Runtime dependencies are pinned with artifact hashes in `requirements.lock`.
 Regenerate it with Python 3.12 and `pip-tools==7.6.0` after changing project

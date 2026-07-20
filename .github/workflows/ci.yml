@@ -34,12 +34,14 @@ jobs:
         run: |
           python -m pip install pip==26.1.2
           python -m pip install --require-hashes --requirement requirements.lock
-          python -m pip install pytest==9.0.2
+          python -m pip install pytest==9.0.2 ruff==0.15.13
           python -m pip check
 
       - name: Test and static validation
         run: |
           python -m pytest -q
+          python -m knowledge_ops.cli evaluate-memory
+          ruff check knowledge_ops tests
           python -m compileall -q knowledge_ops tests
           node --check knowledge_ops/static/app.js
           docker compose config --quiet
@@ -53,6 +55,7 @@ jobs:
         run: |
           docker build --tag knowledge-ops:ci .
           docker run --rm knowledge-ops:ci python -m pip check
+          docker run --rm knowledge-ops:ci python -m knowledge_ops.cli evaluate-memory
           docker save --output /tmp/knowledge-ops-ci.tar knowledge-ops:ci
           docker run --rm --volume /tmp:/scan:ro \
             aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \

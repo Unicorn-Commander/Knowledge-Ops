@@ -2,11 +2,111 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 from typing import Any, Iterable
 
 from .config import settings
 from .models import utcnow
+
+
+SCHEMA_VERSION = 1
+
+
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(db: sqlite3.Connection, table: str, definition: str) -> None:
+    name = definition.split(None, 1)[0]
+    if name not in _columns(db, table):
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+def _migrate_v1(db: sqlite3.Connection) -> None:
+    for definition in (
+        "valid_from TEXT",
+        "valid_until TEXT",
+        "supersedes_id TEXT",
+        "lifecycle_state TEXT NOT NULL DEFAULT 'active'",
+        "tombstoned_at TEXT",
+        "tombstone_reason TEXT",
+        "review_due_at TEXT",
+    ):
+        _add_column(db, "wiki_docs", definition)
+    for definition in (
+        "span_start INTEGER NOT NULL DEFAULT 0",
+        "span_end INTEGER NOT NULL DEFAULT 0",
+    ):
+        _add_column(db, "file_chunks", definition)
+    _add_column(db, "openwiki_imports", "deleted_document_count INTEGER NOT NULL DEFAULT 0")
+
+    db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wiki_docs_lifecycle
+          ON wiki_docs(lifecycle_state, valid_from, valid_until);
+        CREATE INDEX IF NOT EXISTS idx_wiki_docs_review_due
+          ON wiki_docs(review_due_at, lifecycle_state);
+
+        CREATE TABLE IF NOT EXISTS review_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          resource_type TEXT NOT NULL,
+          resource_id TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL DEFAULT 'open',
+          severity TEXT NOT NULL DEFAULT 'review',
+          reason TEXT NOT NULL,
+          details_json TEXT NOT NULL DEFAULT '{}',
+          detected_at TEXT NOT NULL,
+          due_at TEXT,
+          resolved_at TEXT,
+          resolved_by TEXT,
+          resolution_note TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_review_items_status
+          ON review_items(status, kind, detected_at);
+
+        CREATE TABLE IF NOT EXISTS refresh_jobs (
+          job_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          source_ref TEXT NOT NULL,
+          interval_seconds INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS refresh_runs (
+          run_id TEXT PRIMARY KEY,
+          job_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          status TEXT NOT NULL,
+          scheduled_for TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          actor TEXT NOT NULL,
+          result_json TEXT NOT NULL DEFAULT '{}',
+          error TEXT,
+          UNIQUE(job_id, idempotency_key),
+          FOREIGN KEY(job_id) REFERENCES refresh_jobs(job_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_refresh_runs_job_time
+          ON refresh_runs(job_id, scheduled_for DESC);
+
+        CREATE TABLE IF NOT EXISTS deletion_events (
+          deletion_id TEXT PRIMARY KEY,
+          doc_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          deleted_at TEXT NOT NULL,
+          projections_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_deletion_events_doc
+          ON deletion_events(doc_id, deleted_at DESC);
+        """
+    )
+    db.execute(
+        "UPDATE wiki_docs SET valid_from=created_at WHERE valid_from IS NULL OR valid_from=''"
+    )
 
 
 def connect() -> sqlite3.Connection:
@@ -98,8 +198,16 @@ def init_db() -> None:
               reviewed_at TEXT,
               review_note TEXT
             );
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,
+              applied_at TEXT NOT NULL
+            );
             """
         )
+        applied = {int(row["version"]) for row in db.execute("SELECT version FROM schema_migrations")}
+        if 1 not in applied:
+            _migrate_v1(db)
+            db.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", (1, now()))
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

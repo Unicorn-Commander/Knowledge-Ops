@@ -13,12 +13,10 @@ from .adapters.qdrant import search_qdrant
 from .adapters.rest_source import search_rest_sources
 from .config import settings
 from .authorization import Principal, filter_passages, validate_requested_scope
-from .file_index import deep_read as file_deep_read
 from .file_index import find_file as file_find
 from .models import Passage, SearchResponse, SourceStatus
-from .wiki import get_doc, history, list_docs, search_wiki, upsert_doc
-from .metrics import record_metric, render_metric_chart
-from .text import STOPWORDS, tokenize
+from .wiki import search_wiki
+from .text import STOPWORDS, stable_id, tokenize
 
 
 def enforce_rls(passages: list[Passage], principal: Principal, scope: str | None) -> list[Passage]:
@@ -118,18 +116,28 @@ async def search(
     k: int = 8,
     *,
     principal: Principal,
+    as_of: str | None = None,
 ) -> SearchResponse:
     principal.require("read:knowledge")
     validate_requested_scope(principal, scope)
     if not query.strip():
         raise ValueError("query must not be empty")
     k = max(1, min(int(k), 50))
+    if as_of:
+        if not sources:
+            sources = ["wiki"]
+        unsupported = sorted(set(sources) - {"wiki"})
+        if unsupported:
+            raise ValueError(
+                "as_of retrieval supports only the versioned wiki source; "
+                f"unsupported sources: {', '.join(unsupported)}"
+            )
     selected, qdrant_sources, falkor_sources, rest_sources, postgres_sources = _source_parts(sources)
     sync_hits: list[Passage] = []
     if "org_memory" in selected:
         sync_hits.extend(search_ai_memory(query, k=k, scope=scope, principal=principal))
     if "wiki" in selected:
-        sync_hits.extend(search_wiki(query, k=k, scope=scope, principal=principal))
+        sync_hits.extend(search_wiki(query, k=k, scope=scope, principal=principal, as_of=as_of))
     if "file_index" in selected:
         sync_hits.extend(file_find(query, k=k, scope=scope, principal=principal))
 
@@ -164,16 +172,34 @@ async def search(
     return SearchResponse(query=query, passages=hits, answer=synthesize_answer(query, hits))
 
 
-async def ground(claim: str, scope: str | None = None, k: int = 8, *, principal: Principal) -> dict:
-    resp = await search(claim, scope=scope, k=k, principal=principal)
+async def ground(
+    claim: str,
+    scope: str | None = None,
+    k: int = 8,
+    *,
+    principal: Principal,
+    sources: list[str] | None = None,
+    as_of: str | None = None,
+) -> dict:
+    resp = await search(claim, scope=scope, sources=sources, k=k, principal=principal, as_of=as_of)
     verdict, method, passages = _grounding_assessment(claim, resp.passages)
+    claim_id = stable_id("claim:" + " ".join(tokenize(claim)))
+    linked: list[Passage] = []
+    claim_terms = {term for term in tokenize(claim) if term not in STOPWORDS and len(term) > 2}
+    for passage in passages:
+        metadata = dict(passage.metadata)
+        metadata["claim_id"] = claim_id
+        metadata["citation_id"] = stable_id(f"citation:{claim_id}:{passage.source}:{passage.source_id}")
+        metadata["matched_claim_terms"] = sorted(claim_terms & set(tokenize(passage.text)))
+        linked.append(replace(passage, metadata=metadata))
     return {
         "claim": claim,
+        "claim_id": claim_id,
         "verdict": verdict,
         "verification_status": "heuristic_not_verified",
         "assessment_method": method,
-        "answer": synthesize_answer(claim, passages),
-        "passages": [p.__dict__ for p in passages],
+        "answer": synthesize_answer(claim, linked),
+        "passages": [p.__dict__ for p in linked],
     }
 
 

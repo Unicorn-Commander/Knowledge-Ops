@@ -8,6 +8,8 @@ from pathlib import Path
 from . import federation
 from .authorization import system_principal
 from .file_index import deep_read, find_file, index_root
+from .evaluation import evaluate_memory
+from .memory_quality import run_due_refresh_jobs
 from .metrics import record_metric, render_metric_chart
 from .storage import init_db
 from .wiki import get_doc, history, ingest_marketing_docs, list_docs, upsert_doc
@@ -34,22 +36,49 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("ingest-marketing")
-    p = sub.add_parser("search"); p.add_argument("query"); p.add_argument("--scope"); p.add_argument("--k", type=int, default=8)
-    p = sub.add_parser("ground"); p.add_argument("claim"); p.add_argument("--scope"); p.add_argument("--k", type=int, default=8)
-    p = sub.add_parser("upsert-doc"); p.add_argument("path"); p.add_argument("file"); p.add_argument("--scope", default="global")
-    p = sub.add_parser("get-doc"); p.add_argument("id")
+    p = sub.add_parser("search")
+    p.add_argument("query")
+    p.add_argument("--scope")
+    p.add_argument("--k", type=int, default=8)
+    p = sub.add_parser("ground")
+    p.add_argument("claim")
+    p.add_argument("--scope")
+    p.add_argument("--k", type=int, default=8)
+    p = sub.add_parser("upsert-doc")
+    p.add_argument("path")
+    p.add_argument("file")
+    p.add_argument("--scope", default="global")
+    p = sub.add_parser("get-doc")
+    p.add_argument("id")
     sub.add_parser("list-docs")
-    p = sub.add_parser("history"); p.add_argument("id")
-    p = sub.add_parser("index-files"); p.add_argument("root"); p.add_argument("--limit", type=int)
-    p = sub.add_parser("find-file"); p.add_argument("query"); p.add_argument("--k", type=int, default=8)
-    p = sub.add_parser("deep-read"); p.add_argument("path"); p.add_argument("--query", default=""); p.add_argument("--k", type=int, default=8)
-    p = sub.add_parser("record-metric"); p.add_argument("name"); p.add_argument("value", type=float); p.add_argument("--tags", default="{}")
-    p = sub.add_parser("chart"); p.add_argument("name"); p.add_argument("--out", default="")
+    p = sub.add_parser("history")
+    p.add_argument("id")
+    p = sub.add_parser("index-files")
+    p.add_argument("root")
+    p.add_argument("--limit", type=int)
+    p = sub.add_parser("find-file")
+    p.add_argument("query")
+    p.add_argument("--k", type=int, default=8)
+    p = sub.add_parser("deep-read")
+    p.add_argument("path")
+    p.add_argument("--query", default="")
+    p.add_argument("--k", type=int, default=8)
+    p = sub.add_parser("record-metric")
+    p.add_argument("name")
+    p.add_argument("value", type=float)
+    p.add_argument("--tags", default="{}")
+    p = sub.add_parser("chart")
+    p.add_argument("name")
+    p.add_argument("--out", default="")
     sub.add_parser("demo")
+    p = sub.add_parser("refresh-due")
+    p.add_argument("--at")
+    sub.add_parser("evaluate-memory")
     args = parser.parse_args()
 
     if args.cmd == "init":
-        init_db(); print("initialized")
+        init_db()
+        print("initialized")
     elif args.cmd == "ingest-marketing":
         print_json({"ids": ingest_marketing_docs()})
     elif args.cmd == "search":
@@ -83,6 +112,13 @@ def main() -> None:
             print(svg)
     elif args.cmd == "demo":
         asyncio.run(demo())
+    elif args.cmd == "refresh-due":
+        print_json({"runs": run_due_refresh_jobs(actor=_LOCAL.subject, at=args.at)})
+    elif args.cmd == "evaluate-memory":
+        result = evaluate_memory()
+        print_json(result)
+        if not result["passed"]:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

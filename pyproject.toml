@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowledge-ops"
-version = "0.2.0"
+version = "0.3.0"
 description = "Magic Unicorn governed evidence and memory layer"
 requires-python = ">=3.11"
 dependencies = [
@@ -25,7 +25,7 @@ mcp = ["mcp==1.28.1"]
 # RedisGraph client. Install with: pip install 'knowledge-ops[live]'
 live = ["redis==5.3.1"]
 all = ["mcp==1.28.1", "redis==5.3.1"]
-test = ["pytest==9.0.2"]
+test = ["pytest==9.0.2", "ruff==0.15.13"]
 
 [project.scripts]
 knowledge-ops = "knowledge_ops.cli:main"

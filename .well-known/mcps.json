@@ -1,7 +1,7 @@
 {
   "$schema": "https://unicorncommander.ai/schemas/mcps-manifest-v1.json",
   "name": "Knowledge-Ops",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Magic Unicorn governed evidence retrieval layer. Agents call knowledge.search / knowledge.ground; the service federates authorized stores, returns cited evidence excerpts, and labels automated grounding as heuristic rather than verified. Storage-opaque: agents never touch backing stores directly.",
   "tool_namespace": "knowledge",
   "mcp_endpoint": "https://knowledge-ops.magicunicorn.dev/mcp",
@@ -12,7 +12,7 @@
     "command": "python3",
     "args": ["-m", "knowledge_ops.mcp_server"],
     "cwd": "/opt/knowledge-ops",
-    "note": "Local transport for Claude Desktop / Cursor (see KNOWLEDGE-OPS.md). The HTTPS mcp_endpoint above is the broker-facing HTTP-MCP surface (see report: REST is live today, HTTP-MCP JSON-RPC is the remaining tools/call wiring)."
+    "note": "Local transport for Claude Desktop / Cursor (see KNOWLEDGE-OPS.md). The HTTPS endpoint is the broker-facing HTTP-MCP JSON-RPC surface."
   },
   "auth": {
     "supported": ["brigade_jwt"],
@@ -38,6 +38,7 @@
           "query": {"type": "string"},
           "scope": {"type": "string", "enum": ["global", "personal", "all"], "description": "Optional visibility filter. Omission derives visible knowledge from the verified identity; all requires knowledge-admin."},
           "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of org_memory|wiki|file_index|qdrant|qdrant:<collection>|falkordb|falkordb:<graph>|center_deep|rest:<name>|postgres:<name>."},
+          "as_of": {"type": "string", "description": "Optional ISO 8601 historical time. Historical retrieval is confined to the versioned wiki source."},
           "k": {"type": "integer", "default": 8}
         },
         "required": ["query"]
@@ -55,6 +56,8 @@
         "properties": {
           "query": {"type": "string", "description": "The claim or question to ground."},
           "scope": {"type": "string", "enum": ["global", "personal", "all"]},
+          "sources": {"type": "array", "items": {"type": "string"}},
+          "as_of": {"type": "string", "description": "Optional ISO 8601 historical time. Historical retrieval is confined to the versioned wiki source."},
           "k": {"type": "integer", "default": 8}
         },
         "required": ["query"]
@@ -134,9 +137,46 @@
         "properties": {
           "path": {"type": "string"},
           "md": {"type": "string"},
-          "scope": {"type": "string", "enum": ["personal", "global"], "default": "personal", "description": "Personal ownership is derived from token sub. Global requires write:knowledge:global."}
+          "scope": {"type": "string", "enum": ["personal", "global"], "default": "personal", "description": "Personal ownership is derived from token sub. Global requires write:knowledge:global."},
+          "valid_from": {"type": "string", "description": "Optional ISO 8601 validity start."},
+          "valid_until": {"type": "string", "description": "Optional ISO 8601 validity end."},
+          "supersedes_id": {"type": "string", "description": "Optional predecessor document id."},
+          "review_due_at": {"type": "string", "description": "Optional ISO 8601 review date."}
         },
         "required": ["path", "md"]
+      }
+    },
+    {
+      "name": "inspect_citation",
+      "description": "Inspect the authorized, content-bound source span behind a wiki or file-index citation.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "POST", "path": "/kb.inspect_citation"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "source": {"type": "string", "enum": ["wiki", "file_index"]},
+          "source_id": {"type": "string"},
+          "claim": {"type": "string"}
+        },
+        "required": ["source", "source_id", "claim"]
+      }
+    },
+    {
+      "name": "delete_doc",
+      "description": "Create a governed tombstone and purge all local projections. Global deletion requires knowledge-admin.",
+      "scopes_required": ["write:knowledge"],
+      "tier_required": "free",
+      "read_only": false,
+      "rest": {"method": "POST", "path": "/kb.delete_doc"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "reason": {"type": "string", "minLength": 3}
+        },
+        "required": ["id", "reason"]
       }
     },
     {
