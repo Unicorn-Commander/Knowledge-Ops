@@ -5,23 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Knowledge-Ops — Magic Unicorn</title>
   <meta name="description" content="Ask the organization's knowledge, get a cited answer. Magic Unicorn federated grounding layer." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23b66eff'/%3E%3Cstop offset='1' stop-color='%2300d4ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='url(%23g)'/%3E%3Ctext x='50' y='68' font-size='56' text-anchor='middle' font-family='Inter,Arial' font-weight='900' fill='%2307050b'%3EK%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">Skip to content</a>
   <header class="nav">
     <div class="nav__inner">
       <a class="brand" href="#ask">
         <span class="mark">K</span>
         <span>
           <span class="brand__name">Knowledge<b>-Ops</b></span>
-          <span class="brand__tag">Innovation That Doesn't Apologize</span>
+          <span class="brand__tag">Governed memory</span>
         </span>
       </a>
-      <div class="nav__status" id="navStatus" title="Service status">
+      <div class="nav__status" id="navStatus" title="Service status" role="status" aria-live="polite">
         <span class="dot" id="statusDot"></span>
         <span id="statusText">checking…</span>
       </div>
@@ -30,23 +28,20 @@
 
   <div class="shell">
     <nav class="side" id="sideNav">
-      <button class="side__btn active" data-view="ask"><span class="ico">◎</span> Ask / Ground</button>
-      <button class="side__btn" data-view="wiki"><span class="ico">▤</span> Wiki</button>
-      <button class="side__btn" data-view="files"><span class="ico">⌕</span> Files</button>
-      <button class="side__btn" data-view="metrics"><span class="ico">◷</span> Metrics</button>
-      <button class="side__btn" data-view="sources"><span class="ico">⛓</span> Sources</button>
-      <button class="side__btn" data-view="help"><span class="ico">?</span> Help</button>
-      <div class="side__hint">
-        Storage-opaque federation across wiki, file index, Qdrant, FalkorDB &amp; org memory. Every answer is scoped and cited.
-      </div>
+      <button type="button" class="side__btn active" data-view="ask"><span class="ico" aria-hidden="true">◎</span> Ask</button>
+      <button type="button" class="side__btn" data-view="wiki"><span class="ico" aria-hidden="true">▤</span> Library</button>
+      <button type="button" class="side__btn" data-view="review"><span class="ico" aria-hidden="true">✓</span> Review</button>
+      <button type="button" class="side__btn" data-view="files"><span class="ico" aria-hidden="true">⌕</span> Files</button>
+      <button type="button" class="side__btn" data-view="sources"><span class="ico" aria-hidden="true">⛓</span> Sources</button>
+      <button type="button" class="side__btn" data-view="metrics"><span class="ico" aria-hidden="true">◷</span> Operations</button>
     </nav>
 
-    <main class="main">
+    <main class="main" id="mainContent" tabindex="-1">
       <!-- ============ ASK / GROUND ============ -->
       <section class="view active" id="view-ask">
-        <p class="kicker">◇ Grounded answers</p>
-        <h1 class="title">Ask the org's knowledge, <span class="grad">get a cited answer.</span></h1>
-        <p class="lede">Knowledge-Ops federates every store, merges and re-ranks the evidence, enforces scope (RLS), and returns passages with their source clearly attributed.</p>
+        <p class="kicker">Evidence</p>
+        <h1 class="title">Ask knowledge</h1>
+        <p class="lede">Retrieve accessible evidence with source-level citations. Automated relationships are heuristic, not factual verification.</p>
 
         <div class="card card--strong">
           <div class="field">
@@ -55,12 +50,12 @@
           <div class="row" style="justify-content: space-between;">
             <div class="row">
               <div>
-                <label class="lbl" for="askScope">Scope (RLS)</label>
+                <label class="lbl" for="askScope">Visibility</label>
                 <select class="select" id="askScope">
-                  <option value="">default</option>
+                  <option value="">mine + shared</option>
                   <option value="global">global</option>
                   <option value="personal">personal</option>
-                  <option value="all">all (admin)</option>
+                  <option value="all">all (administrator)</option>
                 </select>
               </div>
               <div>
@@ -72,25 +67,25 @@
               <div>
                 <label class="lbl" for="askMode">Mode</label>
                 <select class="select" id="askMode">
-                  <option value="ground" selected>Ground (verdict + summary)</option>
+                  <option value="ground" selected>Assess evidence</option>
                   <option value="search">Search (raw passages)</option>
                 </select>
               </div>
             </div>
             <div style="align-self: flex-end;">
-              <button class="btn btn--primary" id="askBtn">Ground it →</button>
+              <button class="btn btn--primary" id="askBtn">Check evidence</button>
             </div>
           </div>
         </div>
 
-        <div id="askResult" style="margin-top: 1.2rem;"></div>
+        <div id="askResult" style="margin-top: 1.2rem;" aria-live="polite"></div>
       </section>
 
       <!-- ============ WIKI ============ -->
       <section class="view" id="view-wiki">
-        <p class="kicker">▤ Wiki</p>
-        <h1 class="title">Wiki <span class="grad">store</span></h1>
-        <p class="lede">Versioned markdown docs, indexed for grounding. Browse, read, edit, and view history.</p>
+        <p class="kicker">Canonical</p>
+        <h1 class="title">Library</h1>
+        <p class="lede">Versioned knowledge approved for retrieval.</p>
 
         <div class="grid grid--2" style="align-items: start;">
           <div class="card">
@@ -107,11 +102,30 @@
         </div>
       </section>
 
+      <!-- ============ OPENWIKI REVIEW ============ -->
+      <section class="view" id="view-review">
+        <p class="kicker">OpenWiki</p>
+        <h1 class="title">Review queue</h1>
+        <p class="lede">Validate provenance, access, privacy, and content safety before promotion.</p>
+        <div class="grid grid--2 review-layout" style="align-items:start;">
+          <div class="card">
+            <div class="row" style="justify-content:space-between;margin-bottom:.7rem;">
+              <h2 class="section" style="margin:0;">Imports</h2>
+              <button type="button" class="btn btn--sm" id="reviewRefresh">Refresh</button>
+            </div>
+            <div class="list" id="reviewList"><div class="loading"><span class="spinner"></span> loading...</div></div>
+          </div>
+          <div class="card card--strong" id="reviewPane">
+            <div class="empty">Select an import.</div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ FILES ============ -->
       <section class="view" id="view-files">
-        <p class="kicker">⌕ File index</p>
-        <h1 class="title">Files <span class="grad">deep-read</span></h1>
-        <p class="lede">Search the indexed file corpus, then deep-read every chunk of a single file.</p>
+        <p class="kicker">Indexed</p>
+        <h1 class="title">Files</h1>
+        <p class="lede">Search content inside approved roots.</p>
 
         <div class="card card--strong">
           <div class="row">
@@ -131,25 +145,26 @@
 
       <!-- ============ METRICS ============ -->
       <section class="view" id="view-metrics">
-        <p class="kicker">◷ Metrics</p>
-        <h1 class="title">Metrics <span class="grad">&amp; charts</span></h1>
-        <p class="lede">Named timeseries with server-rendered SVG charts.</p>
+        <p class="kicker">Service</p>
+        <h1 class="title">Operations</h1>
+        <p class="lede">Inspect service metrics.</p>
 
         <div class="card card--strong">
           <div class="row">
             <input class="input" id="metricName" placeholder="metric name, e.g. qwen.orchestrator.plan_seconds" style="flex: 1; min-width: 240px;" />
             <button class="btn btn--primary" id="metricBtn">Render chart</button>
           </div>
-          <p class="dim" style="margin: 0.6rem 0 0; font-size: 0.78rem;">Tip: the demo seed records <code class="mono">qwen.orchestrator.plan_seconds</code>.</p>
         </div>
         <div id="metricResult" style="margin-top: 1.2rem;"></div>
+        <h2 class="section">Recent changes</h2>
+        <div class="list" id="auditResult"><div class="loading"><span class="spinner"></span> loading...</div></div>
       </section>
 
       <!-- ============ SOURCES / STATUS ============ -->
       <section class="view" id="view-sources">
-        <p class="kicker">⛓ Federation</p>
-        <h1 class="title">Sources <span class="grad">&amp; status</span></h1>
-        <p class="lede">The federated stores Knowledge-Ops queries, their live status, and the MCP tools registered with the Brigade broker.</p>
+        <p class="kicker">Federation</p>
+        <h1 class="title">Sources</h1>
+        <p class="lede">Availability and agent access contracts.</p>
 
         <h2 class="section">Federated sources</h2>
         <div class="grid grid--3" id="sourcesGrid"><div class="loading"><span class="spinner"></span> loading…</div></div>
@@ -157,61 +172,16 @@
         <h2 class="section">Registered MCP tools <span class="pill" id="toolNs">knowledge</span></h2>
         <div class="list" id="toolsList"><div class="loading"><span class="spinner"></span> loading…</div></div>
 
-        <h2 class="section">Endpoints</h2>
-        <div class="card">
-          <div class="list" id="endpointsList"></div>
-        </div>
-      </section>
-
-      <!-- ============ HELP ============ -->
-      <section class="view" id="view-help">
-        <p class="kicker">? Help</p>
-        <h1 class="title">Use the <span class="grad">library</span></h1>
-        <p class="lede">Knowledge-Ops is the cited retrieval layer for humans, apps, and Brigade agents. It federates stores without making callers know where the evidence lives.</p>
-
-        <div class="grid grid--2" style="align-items:start;">
-          <div class="card">
-            <h2 class="section" style="margin-top:0;">Ask / Ground</h2>
-            <div class="md">
-              <p><strong>Ground</strong> is for claims and questions that need evidence. It returns a verdict, a short summary, and citations.</p>
-              <p><strong>Search</strong> is for raw retrieval. Use source filters through the API when you need a specific store.</p>
-              <p>Scopes are enforced after retrieval: <code>global</code>, <code>personal</code>, or <code>all</code> for admin use.</p>
-            </div>
-          </div>
-          <div class="card">
-            <h2 class="section" style="margin-top:0;">Wiki</h2>
-            <div class="md">
-              <p>The wiki is the native curated markdown store. Edits are versioned, indexed, and immediately available to grounding.</p>
-              <p>Use it for canonical operating notes, product facts, brand facts, runbooks, and decisions that agents must cite.</p>
-            </div>
-          </div>
-          <div class="card">
-            <h2 class="section" style="margin-top:0;">Federation</h2>
-            <div class="md">
-              <p>Native stores live inside Knowledge-Ops: wiki, file index, metrics, and local org-memory JSONL.</p>
-              <p>Federated stores stay owned by their apps: Qdrant collections, FalkorDB graphs, REST APIs, and read-only Postgres adapters.</p>
-              <p>Adapters are read-only by design. Write paths stay with the owning app unless a Knowledge-Ops wiki tool is explicitly used.</p>
-            </div>
-          </div>
-          <div class="card">
-            <h2 class="section" style="margin-top:0;">MCP / REST</h2>
-            <div class="md">
-              <p>Agents consume <code>/mcp</code> through the Brigade broker with namespace <code>knowledge</code>.</p>
-              <p>Primary tools: <code>search</code>, <code>ground</code>, <code>list_sources</code>, <code>get_doc</code>, <code>list_docs</code>, <code>doc_history</code>, <code>find_file</code>, <code>deep_read</code>, <code>upsert_doc</code>, and <code>record_metric</code>.</p>
-              <p>Developers can use REST directly at <code>/kb.search</code>, <code>/kb.ground</code>, and the other <code>/kb.*</code> routes.</p>
-            </div>
-          </div>
-        </div>
       </section>
     </main>
   </div>
 
   <footer class="foot">
     <span>Magic Unicorn · Knowledge-Ops <span id="versionTag" class="dim"></span></span>
-    <span><a href="/.well-known/mcps.json">manifest</a> · <a href="/docs">API docs</a> · <a href="/health">health</a></span>
+    <span><a href="/ready">service readiness</a></span>
   </footer>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

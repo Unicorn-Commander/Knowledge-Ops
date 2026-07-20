@@ -30,6 +30,10 @@ def _seed_tmp_env(tmp_path, monkeypatch):
         monkeypatch.setattr(mod.settings, "db_path", db_path)
     # ai_memory chunks file shouldn't exist in tests.
     monkeypatch.setattr(config.settings, "ai_memory_chunks", tmp_path / "nope.jsonl")
+    monkeypatch.setattr(config.settings, "openwiki_staging_dir", tmp_path / "openwiki" / "staging")
+    monkeypatch.setattr(config.settings, "default_file_roots", [tmp_path])
+    monkeypatch.setattr(config.settings, "default_personal_owner", "local-system")
+    monkeypatch.setattr(config.settings, "api_require_auth", False)
     (wiki_dir / "marketing").mkdir(parents=True, exist_ok=True)
     (wiki_dir / "marketing" / "mu.md").write_text(
         "# Magic Unicorn\n\nMagic Unicorn builds sovereign AI you actually own — "
@@ -93,13 +97,17 @@ def test_falkordb_terms_are_sanitized():
 def test_ground_returns_cited_evidence(tmp_path, monkeypatch):
     _seed_tmp_env(tmp_path, monkeypatch)
     from knowledge_ops import federation
+    from knowledge_ops.authorization import system_principal
     from knowledge_ops.wiki import seed_wiki_from_disk
 
     seed_wiki_from_disk()
-    res = asyncio.run(federation.ground("What is Magic Unicorn?", scope="global", k=5))
-    assert res["verdict"] == "evidence_found"
+    res = asyncio.run(federation.ground(
+        "What is Magic Unicorn?", scope="global", k=5, principal=system_principal()
+    ))
+    assert res["verdict"] == "related_evidence"
+    assert res["verification_status"] == "heuristic_not_verified"
     assert res["passages"], "expected supporting passages"
-    assert "Citations:" in res["answer"]
+    assert "Evidence excerpts" in res["answer"] and "Source:" in res["answer"]
     assert any(p["source"] == "wiki" for p in res["passages"])
 
 
@@ -143,6 +151,22 @@ def test_postgres_adapter_disabled_by_missing_driver_or_dead_dsn(monkeypatch):
     assert asyncio.run(search_postgres_sources("anything", names={"accounting_ops"})) == []
 
 
+def test_postgres_authorization_contract_requires_identity_bound_select():
+    from knowledge_ops.adapters.postgres_source import has_authorization_contract
+
+    base = {
+        "name": "accounting_ops",
+        "dsn": "postgresql://example/db",
+        "enforces_authorization": True,
+    }
+    assert not has_authorization_contract({**base, "sql": "select * from knowledge_docs"})
+    assert not has_authorization_contract({**base, "sql": "delete from knowledge_docs where owner = %(owner)s"})
+    assert has_authorization_contract({
+        **base,
+        "sql": "select * from knowledge_docs where owner = %(owner)s",
+    })
+
+
 def test_api_health_and_manifest_routes(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
@@ -151,6 +175,7 @@ def test_api_health_and_manifest_routes(tmp_path, monkeypatch):
 
     with TestClient(app) as client:  # triggers lifespan (seed-on-startup)
         assert client.get("/health").json()["ok"] is True
+        assert client.get("/ready").json()["ok"] is True
         man = client.get("/.well-known/mcps.json")
         assert man.status_code == 200
         assert man.json()["tool_namespace"] == "knowledge"

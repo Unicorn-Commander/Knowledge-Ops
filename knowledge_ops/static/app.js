@@ -73,7 +73,8 @@ async function api(path, opts = {}) {
   let body;
   try { body = await res.json(); } catch { body = null; }
   if (!res.ok) {
-    const detail = body && (body.detail || body.error || JSON.stringify(body));
+    const raw = body && (body.detail || body.error || body);
+    const detail = typeof raw === "string" ? raw : raw && (raw.message || JSON.stringify(raw));
     throw new Error(detail || `HTTP ${res.status}`);
   }
   return body;
@@ -89,11 +90,17 @@ function toast(msg, kind = "") {
 
 /* ---------- nav ---------- */
 function showView(name) {
-  $$(".side__btn").forEach(b => b.classList.toggle("active", b.dataset.view === name));
+  $$(".side__btn").forEach(b => {
+    const selected = b.dataset.view === name;
+    b.classList.toggle("active", selected);
+    if (selected) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
   if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
   if (name === "wiki") loadWiki();
+  if (name === "review") loadReview();
   if (name === "sources") loadSources();
+  if (name === "metrics") loadAudit();
 }
 $$(".side__btn").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
 
@@ -104,12 +111,15 @@ function passageCard(p, i) {
   const scope = p.scope ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : "";
   const uri = p.uri ? `<div class="dim mono" style="margin-top:.4rem;font-size:.72rem;word-break:break-all;">${esc(p.uri)}</div>` : "";
   const text = esc(p.text || "");
+  const relation = p.metadata && p.metadata.evidence_relation
+    ? `<span class="pill">${esc(String(p.metadata.evidence_relation).replaceAll("_", " "))}</span>` : "";
   return `<div class="cite">
     <div class="cite__head">
       <span class="cite__n">${i}</span>
       <span class="src-badge ${sc}">${esc(sourceLabel(p.source))}</span>
       <span class="cite__title">${esc(p.title || p.source_id || "untitled")}</span>
       ${scope}
+      ${relation}
       <span class="cite__meta">score ${fmtScore(p.score)} · ${owner}</span>
     </div>
     <div class="cite__text" data-full="${text.length > 480 ? '1' : ''}">${text || '<span class="dim">(no snippet)</span>'}</div>
@@ -132,20 +142,25 @@ async function doAsk() {
     const passages = data.passages || [];
     let html = "";
     if (mode === "ground") {
-      const verdict = data.verdict === "evidence_found"
-        ? `<span class="pill pill--ok">● evidence found</span>`
-        : `<span class="pill pill--off">○ not enough evidence</span>`;
-      const ans = (data.answer || "").split(/\n\nCitations:/)[0];
-      html += `<div class="card card--strong"><div class="answer"><div class="verdict">${verdict}</div>${esc(ans)}</div></div>`;
+      const labels = {
+        possible_support: ["pill--ok", "possible support"],
+        possible_contradiction: ["", "possible contradiction"],
+        possible_conflict: ["", "possible conflict"],
+        related_evidence: ["pill--scope", "related evidence"],
+        not_enough_evidence: ["pill--off", "not enough evidence"],
+      };
+      const [cls, label] = labels[data.verdict] || ["pill--off", "unassessed"];
+      const verdict = `<span class="pill ${cls}">${esc(label)}</span>`;
+      html += `<div class="card card--strong"><div class="answer"><div class="verdict">${verdict}<span class="pill pill--off">heuristic, not verified</span></div>${esc(data.answer || "")}</div></div>`;
     } else if (data.answer) {
       html += `<div class="card card--strong"><div class="answer">${esc(data.answer.split(/\n\nCitations:/)[0])}</div></div>`;
     }
     if (passages.length) {
       const srcs = [...new Set(passages.map(p => String(p.source).split(":")[0]))];
-      html += `<h2 class="section">Citations <span class="dim">· ${passages.length} passage${passages.length === 1 ? '' : 's'} from ${srcs.length} source${srcs.length === 1 ? '' : 's'}</span></h2>`;
+      html += `<h2 class="section">Evidence <span class="dim">· ${passages.length} passage${passages.length === 1 ? '' : 's'} from ${srcs.length} source${srcs.length === 1 ? '' : 's'}</span></h2>`;
       html += `<div class="card">${passages.map((p, i) => passageCard(p, i + 1)).join("")}</div>`;
     } else {
-      html += `<div class="empty"><div class="big">○</div>No grounded evidence found for this query under scope <b>${esc(scope || 'default')}</b>.</div>`;
+      html += `<div class="empty">No accessible evidence found.</div>`;
     }
     box.innerHTML = html;
     $$("#askResult .cite__more").forEach(btn => btn.addEventListener("click", () => {
@@ -179,7 +194,8 @@ function renderWikiList() {
   if (!docs.length) { list.innerHTML = `<div class="empty"><div class="big">▤</div>${_wikiDocs.length ? "No docs match the filter." : "No wiki documents yet."}</div>`; return; }
   list.innerHTML = "";
   docs.forEach(d => {
-    const it = el("div", "item");
+    const it = el("button", "item");
+    it.type = "button";
     it.innerHTML = `<div style="min-width:0;"><div class="item__title">${esc(d.title || d.path)}</div><div class="item__sub mono">${esc(d.path)}</div></div>
       <div class="item__meta"><span class="pill pill--scope">${esc(d.scope || "global")}</span></div>`;
     it.addEventListener("click", () => viewDoc(d.id));
@@ -195,12 +211,14 @@ async function viewDoc(id) {
     const { doc } = await api("/kb.get_doc?id=" + encodeURIComponent(id));
     if (!doc) { pane.innerHTML = `<div class="empty">Document not found.</div>`; return; }
     pane.dataset.docId = doc.id;
+    const provenance = doc.provenance
+      ? `<span class="pill">source: ${esc(doc.provenance.source_type)}</span><span class="pill">reviewed ${fmtTime(doc.provenance.reviewed_at)}</span>` : "";
     pane.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:flex-start;">
         <div style="min-width:0;">
           <div class="item__sub mono">${esc(doc.path)}</div>
           <h2 class="section" style="margin:.2rem 0 .4rem;">${esc(doc.title)}</h2>
-          <div class="row"><span class="pill pill--scope">${esc(doc.scope)}</span><span class="pill">owner: ${esc(doc.owner)}</span><span class="pill dim">updated ${fmtTime(doc.updated_at)}</span></div>
+          <div class="row"><span class="pill pill--scope">${esc(doc.scope)}</span><span class="pill">owner: ${esc(doc.owner)}</span><span class="pill dim">updated ${fmtTime(doc.updated_at)}</span>${provenance}</div>
         </div>
         <div class="row">
           <button class="btn btn--sm" id="wikiEditBtn">Edit</button>
@@ -217,13 +235,12 @@ async function viewDoc(id) {
 function editDoc(doc) {
   const pane = $("#wikiPane");
   const isNew = !doc;
-  doc = doc || { path: "", body: "", scope: "global", owner: "magic-unicorn" };
+  doc = doc || { path: "", body: "", scope: "personal", owner: "" };
   pane.innerHTML = `
     <h2 class="section" style="margin-top:0;">${isNew ? "New document" : "Edit document"}</h2>
     <div class="field"><label class="lbl">Path</label><input class="input mono" id="edPath" value="${esc(doc.path)}" placeholder="folder/title.md" ${isNew ? "" : "readonly"} /></div>
     <div class="row" style="margin-bottom:.8rem;">
-      <div><label class="lbl">Scope</label><select class="select" id="edScope"><option ${doc.scope==='global'?'selected':''}>global</option><option ${doc.scope==='personal'?'selected':''}>personal</option></select></div>
-      <div style="flex:1;"><label class="lbl">Owner</label><input class="input" id="edOwner" value="${esc(doc.owner)}" /></div>
+      <div><label class="lbl" for="edScope">Visibility</label><select class="select" id="edScope"><option ${doc.scope==='personal'?'selected':''}>personal</option><option ${doc.scope==='global'?'selected':''}>global</option></select></div>
     </div>
     <div class="field"><label class="lbl">Markdown</label><textarea class="textarea" id="edBody" style="min-height:280px;">${esc(doc.body)}</textarea></div>
     <div class="row"><button class="btn btn--primary" id="edSave">Save</button><button class="btn" id="edCancel">Cancel</button></div>`;
@@ -235,7 +252,7 @@ function editDoc(doc) {
     if (!md.trim()) { toast("Body is required", "err"); return; }
     $("#edSave").disabled = true;
     try {
-      const { id } = await apiJSON("/kb.upsert_doc", { path, md, scope: $("#edScope").value, owner: $("#edOwner").value || "magic-unicorn" });
+      const { id } = await apiJSON("/kb.upsert_doc", { path, md, scope: $("#edScope").value });
       toast("Saved", "ok");
       await loadWiki();
       viewDoc(id);
@@ -251,9 +268,66 @@ async function histDoc(id) {
     let body = history && history.length
       ? `<div class="list">${history.map(h => `<div class="item"><div><div class="item__title">version #${esc(h.version_id)}</div><div class="item__sub">${esc(h.bytes)} bytes</div></div><div class="item__meta dim">${fmtTime(h.created_at)}</div></div>`).join("")}</div>`
       : `<div class="empty">No prior versions — this is the first revision.</div>`;
-    pane.insertAdjacentHTML("afterbegin", `<div class="card" style="margin-bottom:1rem;"><div class="row" style="justify-content:space-between;"><h2 class="section" style="margin:0;">History</h2><button class="btn btn--sm" onclick="this.closest('.card').remove()">Close</button></div>${body}</div>`);
+    pane.insertAdjacentHTML("afterbegin", `<div class="history-panel" id="historyPanel"><div class="row" style="justify-content:space-between;"><h2 class="section" style="margin:0;">History</h2><button type="button" class="btn btn--sm" id="historyClose">Close</button></div>${body}</div>`);
+    $("#historyClose").addEventListener("click", () => $("#historyPanel").remove());
   } catch (e) { toast(e.message, "err"); }
 }
+
+/* ============ OPENWIKI REVIEW ============ */
+async function loadReview() {
+  const list = $("#reviewList");
+  list.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.openwiki_imports");
+    const imports = data.imports || [];
+    if (!imports.length) { list.innerHTML = `<div class="empty">Queue is clear.</div>`; return; }
+    list.innerHTML = "";
+    imports.forEach(item => {
+      const button = el("button", "item");
+      button.type = "button";
+      const blocking = (item.findings || []).filter(f => f.severity === "blocking").length;
+      button.innerHTML = `<div style="min-width:0;text-align:left;"><div class="item__title">${esc(item.import_id)}</div><div class="item__sub">${esc(item.document_count)} docs · ${fmtTime(item.staged_at)}</div></div><div class="item__meta"><span class="pill ${blocking ? '' : 'pill--ok'}">${esc(item.state)}</span></div>`;
+      button.addEventListener("click", () => viewImport(item.import_id));
+      list.appendChild(button);
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function viewImport(id) {
+  const pane = $("#reviewPane");
+  pane.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.openwiki_import?id=" + encodeURIComponent(id));
+    const item = data.import;
+    const findings = item.findings || [];
+    const documents = item.documents || [];
+    pane.innerHTML = `<div class="row" style="justify-content:space-between;align-items:flex-start;">
+      <div><div class="item__sub mono">${esc(item.import_id)}</div><h2 class="section" style="margin:.2rem 0;">${esc(item.document_count)} documents</h2></div>
+      <span class="pill">${esc(item.state)}</span></div>
+      <h3 class="subhead">Findings</h3>
+      <div class="list">${findings.length ? findings.map(f => `<div class="finding finding--${esc(f.severity)}"><strong>${esc(f.category)}</strong><span>${esc(f.path)} · ${esc(f.detail)}</span></div>`).join("") : `<div class="empty">No findings.</div>`}</div>
+      <h3 class="subhead">Documents</h3>
+      <div class="list">${documents.map(d => `<div class="item"><div><div class="item__title">${esc(d.path)}</div><div class="item__sub">${esc(d.okf_type || "missing OKF type")}</div></div><div class="item__meta"><span class="pill pill--scope">${esc(d.scope)}</span></div></div>`).join("")}</div>
+      ${["approved", "rejected"].includes(item.state) ? `<p class="dim">Reviewed ${fmtTime(item.reviewed_at)} by ${esc(item.reviewed_by || "")}</p>` : `<div class="review-actions"><label class="lbl" for="reviewNote">Review note</label><textarea class="textarea" id="reviewNote" rows="3"></textarea><label class="check"><input type="checkbox" id="acceptPii" /> PII is expected and approved for this visibility</label><div class="row"><button type="button" class="btn btn--primary" id="approveImport">Approve</button><button type="button" class="btn" id="rejectImport">Reject</button></div></div>`}`;
+    if ($("#approveImport")) $("#approveImport").addEventListener("click", () => reviewImport(id, true));
+    if ($("#rejectImport")) $("#rejectImport").addEventListener("click", () => reviewImport(id, false));
+  } catch (e) { pane.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
+async function reviewImport(id, approve) {
+  const note = $("#reviewNote").value.trim();
+  if (note.length < 3) { toast("Add a review note", "err"); return; }
+  const endpoint = approve ? "/kb.openwiki_approve" : "/kb.openwiki_reject";
+  try {
+    await apiJSON(endpoint + "?id=" + encodeURIComponent(id), { note, accept_pii: Boolean($("#acceptPii").checked) });
+    toast(approve ? "Import approved" : "Import rejected", "ok");
+    await loadReview();
+    await viewImport(id);
+  } catch (e) { toast(e.message, "err"); }
+}
+$("#reviewRefresh").addEventListener("click", loadReview);
 
 /* ============ FILES ============ */
 async function doFileSearch() {
@@ -315,9 +389,19 @@ async function doMetric() {
 $("#metricBtn").addEventListener("click", doMetric);
 $("#metricName").addEventListener("keydown", (e) => { if (e.key === "Enter") doMetric(); });
 
+async function loadAudit() {
+  const box = $("#auditResult");
+  box.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.audit?limit=50");
+    const events = data.events || [];
+    box.innerHTML = events.length ? events.map(event => `<div class="item"><div><div class="item__title">${esc(event.action)}</div><div class="item__sub">${esc(event.actor)} · ${esc(event.resource)}</div></div><div class="item__meta"><span class="pill ${event.outcome === 'success' || event.outcome === 'approved' ? 'pill--ok' : ''}">${esc(event.outcome)}</span><span class="dim">${fmtTime(event.recorded_at)}</span></div></div>`).join("") : `<div class="empty">No recorded changes.</div>`;
+  } catch (e) { box.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
+}
+
 /* ============ SOURCES / STATUS ============ */
 async function loadSources() {
-  const grid = $("#sourcesGrid"), tools = $("#toolsList"), eps = $("#endpointsList");
+  const grid = $("#sourcesGrid"), tools = $("#toolsList");
   try {
     const data = await api("/kb.list_sources");
     const sources = data.sources || [];
@@ -332,18 +416,13 @@ async function loadSources() {
     $("#toolNs").textContent = man.tool_namespace || "knowledge";
     $("#versionTag").textContent = "v" + (man.version || "");
     tools.innerHTML = (man.tools || []).map(t => `<div class="tool"><div><div><code>${esc(man.tool_namespace)}.${esc(t.name)}</code> ${t.read_only ? '<span class="pill pill--ok" style="margin-left:.3rem;">read-only</span>' : '<span class="pill" style="margin-left:.3rem;">write</span>'}</div><div class="dim" style="margin-top:.25rem;font-size:.84rem;">${esc(t.description || "")}</div></div></div>`).join("");
-    eps.innerHTML = [
-      ["mcp_endpoint (Brigade brokered exec)", man.mcp_endpoint],
-      ["manifest", man.rest_base ? man.rest_base + "/.well-known/mcps.json" : "/.well-known/mcps.json"],
-      ["health", man.health || "/health"],
-    ].map(([k, v]) => `<div class="item"><div class="item__title">${esc(k)}</div><div class="item__meta mono dim" style="word-break:break-all;">${esc(v)}</div></div>`).join("");
   } catch (e) { tools.innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 
 /* ---------- status pulse ---------- */
 async function pulse() {
   try {
-    const h = await api("/health");
+    const h = await api("/ready");
     $("#statusDot").className = "dot dot--ok";
     $("#statusText").textContent = (h && h.service) || "online";
   } catch {
@@ -355,7 +434,7 @@ async function pulse() {
 /* ---------- boot ---------- */
 (function init() {
   const start = (location.hash || "#ask").slice(1);
-  if (["ask", "wiki", "files", "metrics", "sources", "help"].includes(start)) showView(start); else showView("ask");
+  if (["ask", "wiki", "review", "files", "metrics", "sources"].includes(start)) showView(start); else showView("ask");
   pulse();
   setInterval(pulse, 30000);
 })();

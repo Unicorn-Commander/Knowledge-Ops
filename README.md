@@ -1,6 +1,6 @@
 # Knowledge-Ops
 
-Knowledge-Ops is Magic Unicorn's federated grounding layer: a single cited retrieval surface for humans, apps, and Brigade agents. It answers questions from the wiki, indexed files, org memory, Qdrant collections, FalkorDB graphs, Center Deep, REST APIs, and read-only SQL adapters without making callers know where the evidence lives.
+Knowledge-Ops is Magic Unicorn's governed evidence and memory layer: one authorized, cited retrieval surface for humans, apps, and Brigade agents. It retrieves evidence from the canonical wiki, indexed files, org memory, Qdrant, FalkorDB, Center Deep, REST, and read-only SQL without making callers know where each store lives. Automated evidence relationships are labeled heuristic and are not represented as factual verification.
 
 Public dogfood: `https://knowledge-ops.magicunicorn.dev`  
 Human GUI: `/ui/`  
@@ -10,8 +10,9 @@ Brokered agent surface: `/mcp` with namespace `knowledge`
 
 ## What It Does
 
-- Grounds answers with citations instead of free-form recall.
+- Retrieves evidence with citations and conservative contradiction/abstention labels.
 - Curates canonical docs in a versioned markdown wiki.
+- Stages OpenWiki/OKF output behind security and human-review gates before canonical promotion.
 - Searches native and federated stores through one API.
 - Preserves app ownership: Knowledge-Ops reads external stores, it does not take over their write paths.
 - Exposes the same capabilities to the GUI, REST clients, and Brigade MCP tools.
@@ -43,11 +44,13 @@ flowchart LR
   Federated --> CenterDeep[Center Deep Data Intel]
 ```
 
-Native stores are owned by Knowledge-Ops. Federated stores remain owned by the source app. The fan-out merges and re-ranks passages, enforces scope, and returns a cited answer.
+Native stores are owned by Knowledge-Ops. Federated stores remain owned by the source app. The fan-out merges and re-ranks passages, enforces identity-derived visibility, and returns cited evidence.
+
+OpenWiki is a producer outside this trust boundary. Its governed import contract is documented in [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md).
 
 ## GUI
 
-The GUI is served directly by FastAPI at `/ui/`, with no build step. It includes Ask/Ground, Wiki, Files, Metrics, Sources, and Help.
+The GUI is served directly by FastAPI at `/ui/`, with no build step. It includes Ask, Library, OpenWiki Review, Files, Sources, and Operations.
 
 ![Federated sources](docs/screenshots/knowledge-ops-sources.png)
 
@@ -57,10 +60,14 @@ The public host is behind Keycloak SSO via oauth2-proxy. `/health`, `/.well-know
 
 ## Consume It
 
+Production REST calls require a signed Keycloak or Brigade bearer token. Local
+loopback compose explicitly disables API auth for development only.
+
 REST:
 
 ```bash
 curl -s -X POST https://knowledge-ops.magicunicorn.dev/kb.ground \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query":"What is Magic Unicorn?","scope":"global","k":6}'
 ```
@@ -112,6 +119,8 @@ export KNOWLEDGE_OPS_REST_SOURCES='[
     "name": "example_app",
     "url": "https://example.internal/api/search",
     "method": "GET",
+    "enforces_authorization": true,
+    "scope": "global",
     "query_param": "q",
     "limit_param": "limit",
     "results_key": "results"
@@ -126,18 +135,23 @@ export KNOWLEDGE_OPS_POSTGRES_SOURCES='[
   {
     "name": "accounting_ops",
     "dsn": "postgresql://readonly_user:REMOVED@accounting-postgres:5432/accounting",
-    "sql": "select id, title, body as text, scope, owner, uri from knowledge_docs where search_vector @@ plainto_tsquery(%(query)s) limit %(k)s"
+    "enforces_authorization": true,
+    "scope": "global",
+    "sql": "select id, title, body as text, scope, owner, uri from knowledge_docs where search_vector @@ plainto_tsquery(%(query)s) and (scope = 'global' or (scope = 'personal' and owner = %(owner)s)) limit %(k)s"
   }
 ]'
 ```
 
-Postgres queries must be `SELECT` statements and should return `id`, `title`, and `text`, with optional `scope`, `owner`, `uri`, and `score`. The adapter starts a read-only transaction and degrades to empty results on failure.
+REST and Postgres adapters are disabled unless `enforces_authorization=true` explicitly records that the upstream query uses the supplied `scope` and `owner` identity parameters. Postgres queries must be `SELECT` statements containing an `%(owner)s` or `%(owners)s` identity placeholder and should return `id`, `title`, and `text`, with `scope` and `owner` classifications plus optional `uri` and `score`. The adapter starts a read-only transaction and degrades to empty results on failure.
 
 ## Security Model
 
-- Humans authenticate through Keycloak SSO on the public host.
-- Brigade calls `/mcp` with an RS256 JWT, `aud=knowledge-ops`.
-- RLS v0 is scope-based: `global`, `personal`, or admin-only `all`.
+- Every `/kb.*` data request is authorized inside the app with a verified Keycloak or Brigade token; edge SSO alone is not authorization.
+- Brigade calls `/mcp` with an RS256 JWT, `aud=knowledge-ops`, and every tool enforces its manifest scopes.
+- Omitted scope means shared global plus the caller's own personal knowledge. `all`, restricted sources, global writes, indexing, and OpenWiki promotion require explicit privileges.
+- Personal owner values are derived from verified token identity, never request input. Unknown source classification is restricted, not global.
+- Wiki paths and file roots are confined and symlinks are rejected. Request body, rate, and result-count bounds are enforced.
+- SQLite is canonical for wiki documents; atomic Markdown projections are reconciled at startup after a crash.
 - Federated adapters are read-only. Qdrant uses search only; FalkorDB uses `GRAPH.RO_QUERY`; Postgres queries are read-only `SELECT`.
 - Secrets stay out of git. Use host env files for DB DSNs and bearer tokens.
 
@@ -193,4 +207,12 @@ ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.ba
 
 ```bash
 python3 -m pytest -q
+```
+
+Runtime dependencies are pinned with artifact hashes in `requirements.lock`.
+Regenerate it with Python 3.12 and `pip-tools==7.6.0` after changing project
+dependencies:
+
+```bash
+python3.12 -m piptools compile pyproject.toml --extra all --generate-hashes --strip-extras --output-file requirements.lock
 ```

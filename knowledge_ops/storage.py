@@ -38,6 +38,17 @@ def init_db() -> None:
               created_at TEXT NOT NULL
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(doc_id UNINDEXED, title, body);
+            CREATE TABLE IF NOT EXISTS wiki_provenance (
+              doc_id TEXT PRIMARY KEY,
+              source_type TEXT NOT NULL,
+              source_uri TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              content_sha256 TEXT NOT NULL,
+              import_id TEXT NOT NULL,
+              reviewed_by TEXT NOT NULL,
+              reviewed_at TEXT NOT NULL,
+              metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
 
             CREATE TABLE IF NOT EXISTS file_chunks (
               id TEXT PRIMARY KEY,
@@ -61,6 +72,32 @@ def init_db() -> None:
               recorded_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_metrics_name_time ON metrics(name, recorded_at);
+
+            CREATE TABLE IF NOT EXISTS audit_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              actor TEXT NOT NULL,
+              action TEXT NOT NULL,
+              resource TEXT NOT NULL,
+              outcome TEXT NOT NULL,
+              details_json TEXT NOT NULL DEFAULT '{}',
+              recorded_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_events_time ON audit_events(recorded_at);
+
+            CREATE TABLE IF NOT EXISTS openwiki_imports (
+              import_id TEXT PRIMARY KEY,
+              producer_version TEXT NOT NULL,
+              source_digest TEXT NOT NULL,
+              staged_path TEXT NOT NULL,
+              state TEXT NOT NULL,
+              document_count INTEGER NOT NULL,
+              findings_json TEXT NOT NULL,
+              staged_by TEXT NOT NULL,
+              staged_at TEXT NOT NULL,
+              reviewed_by TEXT,
+              reviewed_at TEXT,
+              review_note TEXT
+            );
             """
         )
 
@@ -80,3 +117,29 @@ def json_dumps(obj: Any) -> str:
 
 def now() -> str:
     return utcnow()
+
+
+def record_audit(actor: str, action: str, resource: str, outcome: str, details: dict[str, Any] | None = None) -> int:
+    """Append a bounded structured audit event without storing document content."""
+    clean_details = {str(k)[:80]: str(v)[:500] for k, v in (details or {}).items()}
+    with connect() as db:
+        row = db.execute(
+            "INSERT INTO audit_events(actor, action, resource, outcome, details_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (actor[:200], action[:120], resource[:500], outcome[:40], json_dumps(clean_details), now()),
+        )
+        return int(row.lastrowid)
+
+
+def audit_rows(limit: int = 100) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute(
+            """SELECT id, actor, action, resource, outcome, details_json, recorded_at
+               FROM audit_events ORDER BY id DESC LIMIT ?""",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["details"] = json.loads(item.pop("details_json", "{}"))
+        result.append(item)
+    return result

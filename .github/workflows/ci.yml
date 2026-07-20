@@ -1,0 +1,60 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Install locked runtime and test dependencies
+        run: |
+          python -m pip install pip==26.1.2
+          python -m pip install --require-hashes --requirement requirements.lock
+          python -m pip install pytest==9.0.2
+          python -m pip check
+
+      - name: Test and static validation
+        run: |
+          python -m pytest -q
+          python -m compileall -q knowledge_ops tests
+          node --check knowledge_ops/static/app.js
+          docker compose config --quiet
+
+      - name: Audit locked runtime dependencies
+        run: |
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit --requirement requirements.lock
+
+      - name: Build and validate the production image
+        run: |
+          docker build --tag knowledge-ops:ci .
+          docker run --rm knowledge-ops:ci python -m pip check
+          docker save --output /tmp/knowledge-ops-ci.tar knowledge-ops:ci
+          docker run --rm --volume /tmp:/scan:ro \
+            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
+            image --input /scan/knowledge-ops-ci.tar --scanners vuln \
+            --severity HIGH,CRITICAL --exit-code 1 --no-progress

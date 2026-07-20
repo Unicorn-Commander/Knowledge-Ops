@@ -1,6 +1,6 @@
 # Knowledge-Ops v0
 
-Knowledge-Ops is the Magic Unicorn federation and grounding layer. Agents call `kb.search` or `kb.ground`; the service decides which stores to query, merges evidence, enforces scope, and returns cited passages.
+Knowledge-Ops is the Magic Unicorn governed evidence and memory layer. Agents call `kb.search` or `kb.ground`; the service decides which stores to query, merges authorized evidence, and returns cited passages with explicitly heuristic relationship labels.
 
 ## Federation Map
 
@@ -113,8 +113,9 @@ When `KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1` (set on the public bigboy deploy), every
 `tools/call` must carry a valid Brigade-minted RS256 JWT (`aud=knowledge-ops`,
 issuer in `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS`, verified against
 `KNOWLEDGE_OPS_MCP_JWKS_URL`) — exactly the contract in the manifest's
-`auth.federated_auth`. `initialize`/`tools/list`/`ping` stay open (public
-metadata). Off by default, so local/tests/standalone need no token.
+`auth.federated_auth`. `initialize`/`tools/list`/`ping` stay open because they
+contain public metadata. Local stdio uses an explicit local-system principal;
+the loopback-only development compose disables HTTP auth explicitly.
 
 ## Public auth gate (oauth2-proxy + Keycloak)
 
@@ -123,11 +124,10 @@ On bigboy the public host is fronted by `knowledge-ops-oauth2-proxy`
 Traefik routes the host to the proxy (`:4180`), which proxies to
 `http://knowledge-ops:8765` after SSO. **Whitelisted (public): `/health`,
 `/.well-known/mcps.json`, `/mcp`** — so monitoring, the broker's manifest fetch,
-and brokered execution keep working (the app enforces the Brigade JWT on `/mcp`
-itself). Humans hitting `/ui` or `/kb.*` get Magic Unicorn SSO. The **in-cluster**
-`http://knowledge-ops:8765` is unchanged/open for agents (the proxy only sits on
-the Traefik path). Revert the gate by restoring the pre-auth compose backup and
-deleting the Keycloak `knowledge-ops` client.
+and brokered execution keep working. oauth2-proxy passes the signed Keycloak ID
+token upstream, and the app verifies that token before every `/kb.*` operation.
+Direct in-cluster calls therefore need a valid token too. Humans hitting `/ui`
+or `/kb.*` still enter through Magic Unicorn SSO.
 
 ## Deploy & Persistence
 
@@ -214,8 +214,19 @@ Center Deep directly.
 4. Include scope and owner on every `Passage`.
 5. Add a row in `list_sources`.
 
-## RLS v0
+Config-driven REST/Postgres sources must also declare
+`enforces_authorization=true` and apply the supplied `scope` and `owner`
+parameters in the upstream query. Missing classification is restricted, and a
+missing authorization contract keeps the adapter disabled.
 
-RLS is enforced at the federation layer with a conservative scope filter. `scope=global` returns only global passages. `scope=personal` returns only personal passages. Omitting scope or using `scope=all` is an admin/dev path and returns both.
+## Authorization and visibility
 
-Future Keycloak integration should derive allowed scopes from the JWT and remove direct `all` access from untrusted callers.
+REST and HTTP-MCP share one verified-principal policy. Omitting scope returns
+global knowledge plus personal records owned by token `sub`/identity aliases.
+`scope=personal` cannot retrieve another owner. `scope=all`, restricted sources,
+global writes, file indexing, and OpenWiki promotion require administrator or
+specific elevated scopes. Missing source classification is `restricted`.
+
+OpenWiki 0.1.0 is pinned as an untrusted producer. Its immutable staging,
+OKF/security gates, and review-before-canonical contract are in
+`docs/OPENWIKI-GOVERNANCE.md`.

@@ -4,11 +4,24 @@ import asyncio
 from typing import Any
 
 from ..config import settings
+from ..authorization import Principal, can_read_record
 from ..models import Passage
 from ..text import lexical_score
 
 
-def _query_sync(cfg: dict[str, Any], query: str, k: int, scope: str | None) -> list[Passage]:
+def has_authorization_contract(cfg: dict[str, Any]) -> bool:
+    """Require both an explicit declaration and identity-bound SQL."""
+    sql = str(cfg.get("sql") or "").strip()
+    has_identity_parameter = "%(owner)s" in sql or "%(owners)s" in sql
+    return bool(
+        cfg.get("dsn")
+        and cfg.get("enforces_authorization") is True
+        and sql.lower().lstrip().startswith("select")
+        and has_identity_parameter
+    )
+
+
+def _query_sync(cfg: dict[str, Any], query: str, k: int, scope: str | None, principal: Principal) -> list[Passage]:
     try:
         import psycopg
     except ModuleNotFoundError:
@@ -17,12 +30,17 @@ def _query_sync(cfg: dict[str, Any], query: str, k: int, scope: str | None) -> l
     name = str(cfg.get("name") or "").strip()
     dsn = str(cfg.get("dsn") or "").strip()
     sql = str(cfg.get("sql") or "").strip()
-    if not name or not dsn or not sql:
-        return []
-    if not sql.lower().lstrip().startswith("select"):
+    if not name or not has_authorization_contract(cfg):
         return []
 
-    params = {"query": query, "q": query, "k": max(1, int(k)), "scope": scope or ""}
+    source_scope = str(cfg.get("scope") or "restricted")
+    source_owner = str(cfg.get("owner") or name)
+    if not can_read_record(principal, {"scope": source_scope, "owner": source_owner}, scope):
+        return []
+    params = {
+        "query": query, "q": query, "k": max(1, int(k)), "scope": scope or "",
+        "owner": principal.subject, "owners": sorted(principal.identities),
+    }
     try:
         with psycopg.connect(dsn, connect_timeout=4) as conn:
             conn.execute("SET TRANSACTION READ ONLY")
@@ -37,7 +55,9 @@ def _query_sync(cfg: dict[str, Any], query: str, k: int, scope: str | None) -> l
     for i, row in enumerate(rows):
         text = row.get("text") or row.get("content") or row.get("summary") or row.get("body") or ""
         title = row.get("title") or row.get("name") or row.get("path") or f"{name} row"
-        item_scope = row.get("scope") or "global"
+        item_scope = str(row.get("scope") or "restricted")
+        if item_scope not in {"global", "personal", "restricted"} and not item_scope.startswith("workspace:"):
+            item_scope = "restricted"
         if scope and scope != "all" and item_scope != scope:
             continue
         score = row.get("score")
@@ -57,12 +77,21 @@ def _query_sync(cfg: dict[str, Any], query: str, k: int, scope: str | None) -> l
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
 
 
-async def search_postgres_sources(query: str, k: int = 5, scope: str | None = None, names: set[str] | None = None) -> list[Passage]:
+async def search_postgres_sources(
+    query: str,
+    k: int = 5,
+    scope: str | None = None,
+    names: set[str] | None = None,
+    *,
+    principal: Principal | None = None,
+) -> list[Passage]:
+    if principal is None:
+        return []
     tasks = []
     for cfg in settings.postgres_sources:
         name = str(cfg.get("name") or "").strip()
         if name and (not names or name in names):
-            tasks.append(asyncio.to_thread(_query_sync, cfg, query, k, scope))
+            tasks.append(asyncio.to_thread(_query_sync, cfg, query, k, scope, principal))
     hits: list[Passage] = []
     if tasks:
         for result in await asyncio.gather(*tasks, return_exceptions=True):

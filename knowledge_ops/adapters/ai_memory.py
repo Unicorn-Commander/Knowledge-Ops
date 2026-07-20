@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 
 from ..config import settings
+from ..authorization import Principal, can_read_record, validate_requested_scope
 from ..models import Passage
 from ..text import lexical_score
 
 
-def search_ai_memory(query: str, k: int = 5, scope: str | None = None) -> list[Passage]:
+def search_ai_memory(query: str, k: int = 5, scope: str | None = None, *, principal: Principal) -> list[Passage]:
+    principal.require("read:knowledge")
+    validate_requested_scope(principal, scope)
     path = settings.ai_memory_chunks
     if not path.exists():
         return []
@@ -16,9 +19,13 @@ def search_ai_memory(query: str, k: int = 5, scope: str | None = None) -> list[P
         for line in f:
             if not line.strip():
                 continue
-            item = json.loads(line)
+            try:
+                item = json.loads(line)
+            except (TypeError, ValueError):
+                continue
             item_scope = item.get("scope", "personal")
-            if scope and scope != "all" and item_scope != scope:
+            owner = str(item.get("owner") or (settings.default_personal_owner if item_scope == "personal" else "magic-unicorn"))
+            if not can_read_record(principal, {"scope": item_scope, "owner": owner}, scope):
                 continue
             text = item.get("text", "")
             title = item.get("title", "")
@@ -32,7 +39,7 @@ def search_ai_memory(query: str, k: int = 5, scope: str | None = None) -> list[P
                 text=text,
                 score=score,
                 scope=item_scope,
-                owner="aaron" if item_scope == "personal" else "magic-unicorn",
+                owner=owner,
                 uri=item.get("source_file", ""),
                 metadata={"tags": item.get("tags", []), "cluster": item.get("cluster"), "as_of": item.get("as_of")},
             ))

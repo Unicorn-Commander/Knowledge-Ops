@@ -37,17 +37,27 @@ def test_ui_static_is_served_on_brand(tmp_path, monkeypatch):
         idx = c.get("/ui/")
         assert idx.status_code == 200
         assert "text/html" in idx.headers["content-type"]
-        assert "Knowledge-Ops" in idx.text and "Ask / Ground" in idx.text
+        assert "Knowledge-Ops" in idx.text and "Review queue" in idx.text and "Ask knowledge" in idx.text
         css = c.get("/ui/styles.css")
         assert css.status_code == 200 and "text/css" in css.headers["content-type"]
-        # brand tokens present (purple/gradient, dark)
-        assert "--mu-gradient-brand" in css.text and "#b66eff" in css.text
+        # brand tokens plus mobile/accessibility invariants are present.
+        assert "--mu-gradient-brand" in css.text and "100dvh" in css.text
+        assert "safe-area-inset-bottom" in css.text and "prefers-reduced-motion" in css.text
         assert c.get("/ui/app.js").status_code == 200
 
 
 def test_static_files_present_on_disk():
     for name in ("index.html", "styles.css", "app.js"):
         assert (STATIC / name).is_file(), f"missing static asset {name}"
+
+
+def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert 'class="skip-link"' in html
+    assert 'id="mainContent"' in html and 'aria-live="polite"' in html
+    assert "fonts.googleapis.com" not in html
+    assert "onclick=" not in html and "onclick=" not in js
 
 
 def test_info_route(tmp_path, monkeypatch):
@@ -89,7 +99,8 @@ def test_mcp_tools_call_ground_returns_cited_evidence(tmp_path, monkeypatch):
         result = r.json()["result"]
         assert result["isError"] is False
         payload = result["structuredContent"]
-        assert payload["verdict"] == "evidence_found"
+        assert payload["verdict"] == "related_evidence"
+        assert payload["verification_status"] == "heuristic_not_verified"
         assert payload["passages"], "expected cited passages"
         # content is also JSON text for plain MCP clients
         assert "passages" in result["content"][0]["text"]
@@ -161,10 +172,13 @@ def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
     monkeypatch.setattr(config.settings, "mcp_require_jwt", True)
     monkeypatch.setattr(config.settings, "mcp_trusted_issuers", ["https://brigade.magicunicorn.dev"])
 
-    def mint(aud="knowledge-ops", iss="https://brigade.magicunicorn.dev"):
+    def mint(aud="knowledge-ops", iss="https://brigade.magicunicorn.dev", scope="read:knowledge"):
         now = int(time.time())
+        claims = {"iss": iss, "aud": aud, "sub": "aaron", "iat": now, "exp": now + 300}
+        if scope:
+            claims["scope"] = scope
         return pyjwt.encode(
-            {"iss": iss, "aud": aud, "sub": "aaron", "iat": now, "exp": now + 300},
+            claims,
             key, algorithm="RS256", headers={"kid": "test-kid"},
         )
 
@@ -177,3 +191,10 @@ def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
         assert bad_aud.status_code == 401
         bad_iss = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(iss='https://evil.example')}"})
         assert bad_iss.status_code == 401
+        missing_scope = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(scope='')}"})
+        assert missing_scope.status_code == 403
+        write_call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "upsert_doc", "arguments": {"path": "denied.md", "md": "# Denied"},
+        }}
+        denied_write = c.post("/mcp", json=write_call, headers={"Authorization": f"Bearer {mint()}"})
+        assert denied_write.status_code == 403

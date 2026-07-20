@@ -1,8 +1,8 @@
 {
   "$schema": "https://unicorncommander.ai/schemas/mcps-manifest-v1.json",
   "name": "Knowledge-Ops",
-  "version": "0.1.0",
-  "description": "Magic Unicorn federated grounding layer. Agents call knowledge.search / knowledge.ground; the service decides which stores to query (org_memory, wiki, file_index, Qdrant collections, FalkorDB graphs, Center Deep, REST adapters, read-only Postgres adapters), merges evidence, enforces scope (RLS), and returns cited passages. Storage-opaque: agents never touch backing stores directly.",
+  "version": "0.2.0",
+  "description": "Magic Unicorn governed evidence retrieval layer. Agents call knowledge.search / knowledge.ground; the service federates authorized stores, returns cited evidence excerpts, and labels automated grounding as heuristic rather than verified. Storage-opaque: agents never touch backing stores directly.",
   "tool_namespace": "knowledge",
   "mcp_endpoint": "https://knowledge-ops.magicunicorn.dev/mcp",
   "rest_base": "https://knowledge-ops.magicunicorn.dev",
@@ -15,7 +15,7 @@
     "note": "Local transport for Claude Desktop / Cursor (see KNOWLEDGE-OPS.md). The HTTPS mcp_endpoint above is the broker-facing HTTP-MCP surface (see report: REST is live today, HTTP-MCP JSON-RPC is the remaining tools/call wiring)."
   },
   "auth": {
-    "supported": ["none", "brigade_jwt"],
+    "supported": ["brigade_jwt"],
     "federated_auth": {
       "expected_audience": "knowledge-ops",
       "signing_algorithm": "RS256",
@@ -36,7 +36,7 @@
         "type": "object",
         "properties": {
           "query": {"type": "string"},
-          "scope": {"type": "string", "enum": ["global", "personal", "all"], "description": "RLS scope filter; omit for default."},
+          "scope": {"type": "string", "enum": ["global", "personal", "all"], "description": "Optional visibility filter. Omission derives visible knowledge from the verified identity; all requires knowledge-admin."},
           "sources": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of org_memory|wiki|file_index|qdrant|qdrant:<collection>|falkordb|falkordb:<graph>|center_deep|rest:<name>|postgres:<name>."},
           "k": {"type": "integer", "default": 8}
         },
@@ -45,7 +45,7 @@
     },
     {
       "name": "ground",
-      "description": "Ground a claim/question against the corpus. Returns a verdict (evidence_found|not_enough_evidence), a grounded summary, and the supporting cited passages.",
+      "description": "Triage a claim/question against the corpus. Returns cited excerpts plus an explicitly heuristic relation (possible_support, possible_contradiction, possible_conflict, related_evidence, or not_enough_evidence); it does not claim semantic verification.",
       "scopes_required": ["read:knowledge"],
       "tier_required": "free",
       "read_only": true,
@@ -134,8 +134,7 @@
         "properties": {
           "path": {"type": "string"},
           "md": {"type": "string"},
-          "scope": {"type": "string", "default": "global"},
-          "owner": {"type": "string", "default": "magic-unicorn"}
+          "scope": {"type": "string", "enum": ["personal", "global"], "default": "personal", "description": "Personal ownership is derived from token sub. Global requires write:knowledge:global."}
         },
         "required": ["path", "md"]
       }

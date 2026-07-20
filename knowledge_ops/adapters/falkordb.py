@@ -17,6 +17,7 @@ import asyncio
 import re
 
 from ..config import settings
+from ..authorization import Principal, can_read_record
 from ..models import Passage
 from ..text import STOPWORDS, lexical_score, tokenize
 
@@ -24,6 +25,23 @@ from ..text import STOPWORDS, lexical_score, tokenize
 # inlined token cannot break out of the quoted CONTAINS clause. We additionally
 # use the read-only query command as defense in depth.
 _SAFE = re.compile(r"[^a-z0-9]")
+
+
+def classify_graph(graph: str) -> tuple[str, str]:
+    """Conservative fallback when graph nodes lack explicit scope metadata."""
+    lower = graph.lower()
+    if lower.startswith("cust_ops:ws:"):
+        return f"workspace:{graph.split(':', 2)[2]}", graph
+    personal = re.search(r"__([a-z0-9.-]+)_personal$", lower)
+    if personal:
+        return "personal", personal.group(1)
+    org_global = {
+        "brigade_global", "brigade_knowledge", "agent_meeting_ops_canonical",
+        "contact_ops__magic_unicorn_inc", "majiks_research",
+    }
+    if lower in org_global:
+        return "global", "magic-unicorn"
+    return "restricted", graph
 
 
 def _terms(query: str, limit: int = 6) -> list[str]:
@@ -53,7 +71,8 @@ def _query_sync(query: str, k: int, graph: str) -> list[Passage]:
     cypher = (
         "MATCH (n) WHERE n.name IS NOT NULL AND (" + where + ") "
         "RETURN labels(n)[0] AS label, n.name AS name, "
-        "n.entity_type AS entity_type, n.type AS ntype, n.summary AS summary "
+        "n.entity_type AS entity_type, n.type AS ntype, n.summary AS summary, "
+        "n.scope AS scope, n.owner AS owner "
         f"LIMIT {max(1, int(k))}"
     )
 
@@ -79,32 +98,47 @@ def _query_sync(query: str, k: int, graph: str) -> list[Passage]:
     hits: list[Passage] = []
     for row in rows:
         try:
-            label, name, entity_type, ntype, summary = (list(row) + [None] * 5)[:5]
+            label, name, entity_type, ntype, summary, node_scope, node_owner = (list(row) + [None] * 7)[:7]
         except Exception:
             continue
         if not name:
             continue
         kind = entity_type or ntype or label or "Entity"
         text = summary or f"{name} — {kind} (graph entity)"
+        fallback_scope, fallback_owner = classify_graph(graph)
+        item_scope = str(node_scope) if node_scope in {"global", "personal", "restricted"} else fallback_scope
+        item_owner = str(node_owner or fallback_owner)
         hits.append(Passage(
             source=f"falkordb:{graph}",
             source_id=str(name),
             title=str(name),
             text=str(text),
             score=lexical_score(query, str(text), str(name)) + 1.0,
-            scope="global",
-            owner="magic-unicorn",
+            scope=item_scope,
+            owner=item_owner,
             uri="",
             metadata={"label": label, "kind": kind, "graph": graph},
         ))
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
 
 
-async def search_falkordb(query: str, k: int = 5, scope: str | None = None, graphs: list[str] | None = None) -> list[Passage]:
+async def search_falkordb(
+    query: str,
+    k: int = 5,
+    scope: str | None = None,
+    graphs: list[str] | None = None,
+    *,
+    principal: Principal | None = None,
+) -> list[Passage]:
     if not settings.enable_falkordb:
+        return []
+    if principal is None:
         return []
     # The redis client is sync; run it off the event loop so we never block it.
     hits: list[Passage] = []
     for graph in graphs or settings.falkordb_graphs:
+        graph_scope, graph_owner = classify_graph(graph)
+        if not can_read_record(principal, {"scope": graph_scope, "owner": graph_owner}, scope):
+            continue
         hits.extend(await asyncio.to_thread(_query_sync, query, k, graph))
     return sorted(hits, key=lambda h: h.score, reverse=True)[:k]

@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 
 from . import federation
+from .authorization import system_principal
 from .file_index import deep_read, find_file, index_root
 from .metrics import record_metric, render_metric_chart
 from .storage import init_db
 from .wiki import get_doc, history, ingest_marketing_docs, list_docs, upsert_doc
+
+_LOCAL = system_principal()
 
 
 def print_json(obj: object) -> None:
@@ -19,9 +22,9 @@ def print_json(obj: object) -> None:
 async def demo() -> None:
     init_db()
     ingest_marketing_docs()
-    index_root(Path.home() / "Documents", limit=80)
+    index_root(Path.home() / "Documents", owner=_LOCAL.subject, limit=80)
     record_metric("qwen.orchestrator.plan_seconds", 3.6, {"model": "Qwen3.6-35B-A3B", "host": "bigboy", "gpu": "3090"})
-    res = await federation.search("What is Magic Unicorn?", scope="global", k=8)
+    res = await federation.search("What is Magic Unicorn?", scope="global", k=8, principal=_LOCAL)
     print(res.answer)
     print("\nSources used:", ", ".join(sorted({p.source for p in res.passages})))
 
@@ -50,10 +53,10 @@ def main() -> None:
     elif args.cmd == "ingest-marketing":
         print_json({"ids": ingest_marketing_docs()})
     elif args.cmd == "search":
-        res = asyncio.run(federation.search(args.query, scope=args.scope, k=args.k))
+        res = asyncio.run(federation.search(args.query, scope=args.scope, k=args.k, principal=_LOCAL))
         print_json({"answer": res.answer, "passages": res.passages})
     elif args.cmd == "ground":
-        print_json(asyncio.run(federation.ground(args.claim, scope=args.scope, k=args.k)))
+        print_json(asyncio.run(federation.ground(args.claim, scope=args.scope, k=args.k, principal=_LOCAL)))
     elif args.cmd == "upsert-doc":
         md = Path(args.file).expanduser().read_text(encoding="utf-8", errors="ignore")
         print_json({"id": upsert_doc(args.path, md, args.scope)})
@@ -64,11 +67,11 @@ def main() -> None:
     elif args.cmd == "history":
         print_json(history(args.id))
     elif args.cmd == "index-files":
-        print_json({"chunks": index_root(Path(args.root).expanduser(), limit=args.limit)})
+        print_json({"chunks": index_root(Path(args.root).expanduser(), owner=_LOCAL.subject, limit=args.limit)})
     elif args.cmd == "find-file":
-        print_json(find_file(args.query, args.k))
+        print_json(find_file(args.query, args.k, principal=_LOCAL))
     elif args.cmd == "deep-read":
-        print_json(deep_read(args.path, args.query, args.k))
+        print_json(deep_read(args.path, args.query, args.k, principal=_LOCAL))
     elif args.cmd == "record-metric":
         print_json({"id": record_metric(args.name, args.value, json.loads(args.tags))})
     elif args.cmd == "chart":

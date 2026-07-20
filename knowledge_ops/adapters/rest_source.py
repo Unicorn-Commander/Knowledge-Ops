@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from ..config import settings
+from ..authorization import Principal, can_read_record
 from ..models import Passage
 
 
@@ -20,12 +21,27 @@ def _rows(data: Any, key: str | None) -> list[dict]:
     return []
 
 
-async def search_rest_sources(query: str, k: int = 5, scope: str | None = None, names: set[str] | None = None) -> list[Passage]:
+async def search_rest_sources(
+    query: str,
+    k: int = 5,
+    scope: str | None = None,
+    names: set[str] | None = None,
+    *,
+    principal: Principal | None = None,
+) -> list[Passage]:
+    if principal is None:
+        return []
     hits: list[Passage] = []
     async with httpx.AsyncClient(timeout=8) as client:
         for cfg in settings.rest_sources:
             name = str(cfg.get("name") or "").strip()
             if not name or (names and name not in names):
+                continue
+            if not cfg.get("enforces_authorization"):
+                continue
+            source_scope = str(cfg.get("scope") or "restricted")
+            source_owner = str(cfg.get("owner") or name)
+            if not can_read_record(principal, {"scope": source_scope, "owner": source_owner}, scope):
                 continue
             method = str(cfg.get("method") or "GET").upper()
             url = str(cfg.get("url") or "").strip()
@@ -35,11 +51,12 @@ async def search_rest_sources(query: str, k: int = 5, scope: str | None = None, 
             body = dict(cfg.get("json") or {})
             params[cfg.get("query_param", "q")] = query
             params[cfg.get("limit_param", "k")] = k
+            params[cfg.get("owner_param", "owner")] = principal.subject
             if scope and scope != "all":
                 params[cfg.get("scope_param", "scope")] = scope
             try:
                 if method == "POST":
-                    body.update({"query": query, "q": query, "k": k})
+                    body.update({"query": query, "q": query, "k": k, "owner": principal.subject})
                     if scope and scope != "all":
                         body["scope"] = scope
                     res = await client.post(url, params=params if cfg.get("send_params") else None, json=body)
@@ -53,7 +70,9 @@ async def search_rest_sources(query: str, k: int = 5, scope: str | None = None, 
                 text = row.get("text") or row.get("content") or row.get("snippet") or row.get("summary") or row.get("body") or ""
                 title = row.get("title") or row.get("name") or row.get("path") or f"{name} result"
                 source_id = str(row.get("id") or row.get("uid") or row.get("url") or row.get("path") or i)
-                item_scope = row.get("scope") or "global"
+                item_scope = str(row.get("scope") or "restricted")
+                if item_scope not in {"global", "personal", "restricted"} and not item_scope.startswith("workspace:"):
+                    item_scope = "restricted"
                 hits.append(Passage(
                     source=f"rest:{name}",
                     source_id=source_id,

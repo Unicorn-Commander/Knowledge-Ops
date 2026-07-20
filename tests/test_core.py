@@ -17,6 +17,7 @@ def test_lexical_score_matches_title_and_body():
 
 
 def test_wiki_upsert_and_search(tmp_path, monkeypatch):
+    from knowledge_ops.authorization import system_principal
     import knowledge_ops.config as config
     import knowledge_ops.storage as storage
     import knowledge_ops.wiki as wiki
@@ -30,7 +31,7 @@ def test_wiki_upsert_and_search(tmp_path, monkeypatch):
     monkeypatch.setattr(wiki.settings, "wiki_dir", tmp_path / "wiki")
 
     doc_id = upsert_doc("test/doc.md", "# Test Doc\n\nMagic Unicorn builds sovereign AI.")
-    hits = search_wiki("sovereign AI", k=3)
+    hits = search_wiki("sovereign AI", k=3, principal=system_principal())
     assert doc_id
     assert hits
     assert hits[0].source == "wiki"

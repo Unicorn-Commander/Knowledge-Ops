@@ -16,6 +16,41 @@ class Settings(BaseModel):
     default_file_roots: list[Path] = Field(default_factory=lambda: [
         Path(os.getenv("KNOWLEDGE_OPS_FILE_ROOT", Path.home() / "Documents"))
     ])
+    default_personal_owner: str = os.getenv("KNOWLEDGE_OPS_DEFAULT_PERSONAL_OWNER", "").strip()
+
+    # The application, not the edge proxy, owns authorization. Production API
+    # routes require a signed OIDC or Brigade token by default. Local compose
+    # explicitly disables this while binding only to loopback.
+    api_require_auth: bool = os.getenv("KNOWLEDGE_OPS_API_REQUIRE_AUTH", "1") == "1"
+    api_oidc_jwks_url: str = os.getenv(
+        "KNOWLEDGE_OPS_API_OIDC_JWKS_URL",
+        "https://auth.magicunicorn.dev/realms/uchub/protocol/openid-connect/certs",
+    )
+    api_expected_audience: str = os.getenv("KNOWLEDGE_OPS_API_AUDIENCE", "knowledge-ops")
+    api_trusted_issuers: list[str] = Field(default_factory=lambda: [
+        i.strip() for i in os.getenv(
+            "KNOWLEDGE_OPS_API_TRUSTED_ISSUERS",
+            "https://auth.magicunicorn.dev/realms/uchub",
+        ).split(",") if i.strip()
+    ])
+    api_default_oidc_scopes: list[str] = Field(default_factory=lambda: [
+        s.strip() for s in os.getenv("KNOWLEDGE_OPS_API_DEFAULT_OIDC_SCOPES", "read:knowledge").split(",") if s.strip()
+    ])
+    api_jwks_ttl: int = int(os.getenv("KNOWLEDGE_OPS_API_JWKS_TTL", "3600"))
+    api_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_API_JWT_LEEWAY", "60"))
+    max_request_bytes: int = int(os.getenv("KNOWLEDGE_OPS_MAX_REQUEST_BYTES", "1048576"))
+    rate_limit_per_minute: int = int(os.getenv("KNOWLEDGE_OPS_RATE_LIMIT_PER_MINUTE", "120"))
+
+    # OpenWiki is an untrusted producer. It may write only to immutable staging;
+    # an authorized review action promotes validated documents to the wiki.
+    openwiki_staging_dir: Path = Field(default_factory=lambda: Path(os.getenv(
+        "KNOWLEDGE_OPS_OPENWIKI_STAGING",
+        Path(os.getenv("KNOWLEDGE_OPS_DATA", Path.home() / "Knowledge-Ops" / "data")) / "openwiki" / "staging",
+    )))
+    openwiki_import_roots: list[Path] = Field(default_factory=lambda: [
+        Path(p).expanduser() for p in os.getenv("KNOWLEDGE_OPS_OPENWIKI_IMPORT_ROOTS", "").split(os.pathsep) if p.strip()
+    ])
+    openwiki_producer_version: str = os.getenv("KNOWLEDGE_OPS_OPENWIKI_VERSION", "0.1.0")
 
     qdrant_url: str = os.getenv("KNOWLEDGE_OPS_QDRANT_URL", "http://unicorn-qdrant:6333")
     qdrant_collections: list[str] = Field(default_factory=lambda: [
@@ -58,6 +93,7 @@ class Settings(BaseModel):
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.wiki_dir.mkdir(parents=True, exist_ok=True)
+        self.openwiki_staging_dir.mkdir(parents=True, exist_ok=True)
 
 
 settings = Settings()

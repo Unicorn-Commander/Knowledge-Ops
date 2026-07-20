@@ -5,25 +5,30 @@
 services:
   knowledge-ops:
     build: .
-    image: knowledge-ops:latest
+    image: knowledge-ops:0.2.0
     container_name: knowledge-ops
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      - "127.0.0.1:8765:8765"
     volumes:
       # SQLite + WAL persist across restarts/redeploys.
       - knowledge_ops_data:/data
+      - knowledge_ops_wiki:/wiki
     environment:
       KNOWLEDGE_OPS_DATA: /data
       KNOWLEDGE_OPS_DB: /data/knowledge_ops.sqlite3
-      KNOWLEDGE_OPS_WIKI: /opt/knowledge-ops/wiki
+      KNOWLEDGE_OPS_WIKI: /wiki
+      KNOWLEDGE_OPS_OPENWIKI_STAGING: /data/openwiki/staging
+      # Explicit local-dev trust boundary: unauthenticated API is bound only to
+      # 127.0.0.1 above. Production override resets this to authenticated.
+      KNOWLEDGE_OPS_API_REQUIRE_AUTH: "0"
       # Live adapters default OFF. Enable via the bigboy override (or set =1 here
       # plus the matching *_URL envs if your stores are reachable).
       KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
       KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
       KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8765/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/ready', timeout=5).read()"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -31,3 +36,4 @@ services:
 
 volumes:
   knowledge_ops_data:
+  knowledge_ops_wiki:

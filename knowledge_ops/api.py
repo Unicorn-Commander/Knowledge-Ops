@@ -4,19 +4,30 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import federation, mcp_http
+from .authorization import (
+    AuthorizationError,
+    Principal,
+    authorized_write_target,
+    can_read_record,
+    filter_passages,
+    principal_from_authorization,
+)
 from .config import settings
 from .file_index import deep_read, find_file, index_root
+from .http_middleware import RequestGuardMiddleware
 from .metrics import metric_rows, record_metric, render_metric_chart
-from .storage import init_db
-from .wiki import get_doc, history, ingest_marketing_docs, list_docs, seed_wiki_from_disk, upsert_doc
+from .openwiki_pipeline import approve_import, get_import, list_imports, reject_import, stage_bundle
+from .storage import audit_rows, connect, init_db, record_audit
+from .wiki import get_doc, history, ingest_marketing_docs, list_docs, seed_wiki_from_disk, sync_wiki_to_disk, upsert_doc
 
 logger = logging.getLogger("knowledge_ops")
 
@@ -34,12 +45,20 @@ async def lifespan(app: FastAPI):
         seeded = seed_wiki_from_disk()
         if seeded:
             logger.info("seeded %d wiki docs from %s", len(seeded), settings.wiki_dir)
+        repaired = sync_wiki_to_disk()
+        if repaired:
+            logger.warning("repaired %d wiki markdown projections from canonical storage", repaired)
     except Exception:  # never let seeding crash startup
         logger.exception("wiki seed-on-startup failed (non-fatal)")
     yield
 
 
-app = FastAPI(title="Knowledge-Ops", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Knowledge-Ops", version="0.2.0", lifespan=lifespan)
+app.add_middleware(
+    RequestGuardMiddleware,
+    max_bytes=settings.max_request_bytes,
+    per_minute=settings.rate_limit_per_minute,
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -47,10 +66,33 @@ async def _on_validation_error(request: Request, exc: RequestValidationError) ->
     return JSONResponse({"error": {"type": "validation_error", "detail": exc.errors()}}, status_code=422)
 
 
+@app.exception_handler(AuthorizationError)
+async def _on_forbidden(request: Request, exc: AuthorizationError) -> JSONResponse:
+    return JSONResponse({"error": {"type": "forbidden", "message": str(exc)}}, status_code=403)
+
+
+@app.exception_handler(ValueError)
+async def _on_bad_request(request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse({"error": {"type": "bad_request", "message": str(exc)}}, status_code=400)
+
+
 @app.exception_handler(Exception)
 async def _on_unhandled(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse({"error": {"type": exc.__class__.__name__, "message": str(exc)}}, status_code=500)
+    return JSONResponse({"error": {"type": "internal_error", "message": "request could not be completed"}}, status_code=500)
+
+
+def current_principal(request: Request) -> Principal:
+    try:
+        return principal_from_authorization(
+            request.headers.get("authorization"),
+            require_auth=settings.api_require_auth,
+        )
+    except AuthorizationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}) from exc
+
+
+ApiPrincipal = Annotated[Principal, Depends(current_principal)]
 
 
 @app.get("/")
@@ -63,10 +105,11 @@ def root() -> RedirectResponse:
 def info() -> dict:
     return {
         "service": "knowledge-ops",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "ui": "/ui/",
         "docs": "/docs",
         "health": "/health",
+        "readiness": "/ready",
         "manifest": "/.well-known/mcps.json",
         "mcp_endpoint": "/mcp",
     }
@@ -95,23 +138,33 @@ async def mcp_jsonrpc(request: Request) -> Response:
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=10_000)
     scope: str | None = None
     sources: list[str] | None = None
-    k: int = 8
+    k: int = Field(default=8, ge=1, le=50)
 
 
 class DocRequest(BaseModel):
-    path: str
-    md: str
-    scope: str = "global"
-    owner: str = "magic-unicorn"
+    path: str = Field(min_length=1, max_length=500)
+    md: str = Field(min_length=1, max_length=900_000)
+    scope: Literal["personal", "global"] = "personal"
+    owner: str | None = None
 
 
 class MetricRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=200)
     value: float
-    tags: dict = {}
+    tags: dict = Field(default_factory=dict)
+
+
+class OpenWikiStageRequest(BaseModel):
+    source_path: str = Field(min_length=1, max_length=1000)
+    producer_version: str = Field(min_length=1, max_length=40)
+
+
+class OpenWikiReviewRequest(BaseModel):
+    note: str = Field(min_length=3, max_length=2000)
+    accept_pii: bool = False
 
 
 @app.get("/health")
@@ -119,75 +172,153 @@ def health() -> dict:
     return {"ok": True, "service": "knowledge-ops"}
 
 
+@app.get("/ready")
+def ready() -> JSONResponse:
+    checks = {"database": False, "wiki": settings.wiki_dir.is_dir(), "staging": settings.openwiki_staging_dir.is_dir()}
+    try:
+        with connect() as db:
+            checks["database"] = db.execute("SELECT 1").fetchone()[0] == 1
+    except Exception:
+        logger.exception("readiness database check failed")
+    ok = all(checks.values())
+    return JSONResponse({"ok": ok, "service": "knowledge-ops", "checks": checks}, status_code=200 if ok else 503)
+
+
 @app.post("/kb.search")
-async def kb_search(req: SearchRequest) -> dict:
-    res = await federation.search(req.query, scope=req.scope, sources=req.sources, k=req.k)
+async def kb_search(req: SearchRequest, principal: ApiPrincipal) -> dict:
+    res = await federation.search(req.query, scope=req.scope, sources=req.sources, k=req.k, principal=principal)
     return {"query": res.query, "answer": res.answer, "passages": [p.__dict__ for p in res.passages]}
 
 
 @app.post("/kb.ground")
-async def kb_ground(req: SearchRequest) -> dict:
-    return await federation.ground(req.query, scope=req.scope, k=req.k)
+async def kb_ground(req: SearchRequest, principal: ApiPrincipal) -> dict:
+    return await federation.ground(req.query, scope=req.scope, k=req.k, principal=principal)
 
 
 @app.get("/kb.list_sources")
-def kb_list_sources() -> dict:
-    return {"sources": [s.__dict__ for s in federation.list_sources()]}
+def kb_list_sources(principal: ApiPrincipal) -> dict:
+    principal.require("read:knowledge")
+    rows = [s.__dict__ for s in federation.list_sources()]
+    if not principal.is_admin:
+        for row in rows:
+            row["detail"] = ""
+    return {"sources": rows}
 
 
 @app.get("/kb.docs")
-def kb_docs() -> dict:
-    return {"docs": list_docs()}
+def kb_docs(principal: ApiPrincipal) -> dict:
+    principal.require("read:knowledge")
+    return {"docs": [doc for doc in list_docs() if can_read_record(principal, doc)]}
 
 
 @app.get("/kb.get_doc")
-def kb_get_doc(id: str) -> dict:
-    return {"doc": get_doc(id)}
+def kb_get_doc(id: str, principal: ApiPrincipal) -> dict:
+    principal.require("read:knowledge")
+    doc = get_doc(id)
+    if doc and not can_read_record(principal, doc):
+        raise AuthorizationError("document is outside the caller's visibility")
+    return {"doc": doc}
 
 
 @app.post("/kb.upsert_doc")
-def kb_upsert_doc(req: DocRequest) -> dict:
-    return {"id": upsert_doc(req.path, req.md, req.scope, req.owner)}
+def kb_upsert_doc(req: DocRequest, principal: ApiPrincipal) -> dict:
+    scope, owner = authorized_write_target(principal, req.scope, req.owner)
+    doc_id = upsert_doc(req.path, req.md, scope, owner)
+    record_audit(principal.subject, "wiki.upsert", doc_id, "success", {"scope": scope, "path": req.path})
+    return {"id": doc_id}
 
 
 @app.get("/kb.doc_history")
-def kb_doc_history(id: str) -> dict:
+def kb_doc_history(id: str, principal: ApiPrincipal) -> dict:
+    principal.require("read:knowledge")
+    doc = get_doc(id)
+    if doc and not can_read_record(principal, doc):
+        raise AuthorizationError("document is outside the caller's visibility")
     return {"history": history(id)}
 
 
 @app.post("/kb.ingest_marketing_docs")
-def kb_ingest_marketing_docs() -> dict:
-    return {"ids": ingest_marketing_docs()}
+def kb_ingest_marketing_docs(principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("marketing ingestion requires knowledge-admin")
+    ids = ingest_marketing_docs()
+    record_audit(principal.subject, "wiki.ingest_marketing", "marketing", "success", {"documents": len(ids)})
+    return {"ids": ids}
 
 
 @app.post("/kb.record_metric")
-def kb_record_metric(req: MetricRequest) -> dict:
-    return {"id": record_metric(req.name, req.value, req.tags)}
+def kb_record_metric(req: MetricRequest, principal: ApiPrincipal) -> dict:
+    principal.require("write:knowledge")
+    metric_id = record_metric(req.name, req.value, req.tags)
+    record_audit(principal.subject, "metric.record", req.name, "success")
+    return {"id": metric_id}
 
 
 @app.get("/kb.get_metric_chart")
-def kb_get_metric_chart(name: str, limit: int = 80) -> Response:
+def kb_get_metric_chart(name: str, principal: ApiPrincipal, limit: int = 80) -> Response:
+    principal.require("read:knowledge")
     return Response(render_metric_chart(name, limit), media_type="image/svg+xml")
 
 
 @app.get("/kb.metrics")
-def kb_metrics(name: str, limit: int = 200) -> dict:
+def kb_metrics(name: str, principal: ApiPrincipal, limit: int = 200) -> dict:
+    principal.require("read:knowledge")
     return {"metrics": metric_rows(name, limit)}
 
 
+@app.get("/kb.audit")
+def kb_audit(principal: ApiPrincipal, limit: int = 100) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("audit history requires knowledge-admin")
+    return {"events": audit_rows(limit)}
+
+
 @app.post("/kb.index_files")
-def kb_index_files(root: str, limit: int | None = None) -> dict:
-    return {"chunks": index_root(Path(root).expanduser(), limit=limit)}
+def kb_index_files(root: str, principal: ApiPrincipal, limit: int | None = None) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("file indexing requires knowledge-admin")
+    chunks = index_root(Path(root), owner=principal.subject, limit=limit)
+    record_audit(principal.subject, "files.index", root, "success", {"chunks": chunks})
+    return {"chunks": chunks}
 
 
 @app.get("/kb.find_file")
-def kb_find_file(query: str, k: int = 8, scope: str | None = None) -> dict:
-    return {"passages": [p.__dict__ for p in find_file(query, k, scope)]}
+def kb_find_file(query: str, principal: ApiPrincipal, k: int = 8, scope: str | None = None) -> dict:
+    principal.require("read:knowledge")
+    hits = find_file(query, min(k, 50), scope, principal=principal)
+    return {"passages": [p.__dict__ for p in filter_passages(principal, hits, scope)]}
 
 
 @app.get("/kb.deep_read")
-def kb_deep_read(path: str, query: str = "", k: int = 8) -> dict:
-    return {"passages": [p.__dict__ for p in deep_read(path, query, k)]}
+def kb_deep_read(path: str, principal: ApiPrincipal, query: str = "", k: int = 8) -> dict:
+    principal.require("read:knowledge")
+    hits = deep_read(path, query, min(k, 50), principal=principal)
+    return {"passages": [p.__dict__ for p in filter_passages(principal, hits)]}
+
+
+@app.get("/kb.openwiki_imports")
+def kb_openwiki_imports(principal: ApiPrincipal) -> dict:
+    return {"imports": list_imports(principal)}
+
+
+@app.get("/kb.openwiki_import")
+def kb_openwiki_import(id: str, principal: ApiPrincipal) -> dict:
+    return {"import": get_import(id, principal)}
+
+
+@app.post("/kb.openwiki_stage")
+def kb_openwiki_stage(req: OpenWikiStageRequest, principal: ApiPrincipal) -> dict:
+    return {"import": stage_bundle(req.source_path, req.producer_version, principal)}
+
+
+@app.post("/kb.openwiki_approve")
+def kb_openwiki_approve(id: str, req: OpenWikiReviewRequest, principal: ApiPrincipal) -> dict:
+    return approve_import(id, principal, req.note, accept_pii=req.accept_pii)
+
+
+@app.post("/kb.openwiki_reject")
+def kb_openwiki_reject(id: str, req: OpenWikiReviewRequest, principal: ApiPrincipal) -> dict:
+    return reject_import(id, principal, req.note)
 
 
 # Web GUI — served by this app itself (no build step, no CDN). Mounted last so it

@@ -21,9 +21,17 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from . import federation
-from .brigade_auth import AuthError, require_for_tool_call
+from .authorization import (
+    AuthorizationError,
+    Principal,
+    authorized_write_target,
+    can_read_record,
+    filter_passages,
+    require_tool_principal,
+)
 from .file_index import deep_read, find_file
 from .metrics import record_metric
+from .storage import record_audit
 from .wiki import get_doc, history, list_docs, upsert_doc
 
 logger = logging.getLogger("knowledge_ops.mcp")
@@ -33,50 +41,70 @@ _MANIFEST_PATH = Path(__file__).resolve().parent.parent / ".well-known" / "mcps.
 
 
 # ---- tool handlers: thin adapters over the same logic the REST routes use ----
-async def _t_search(a: dict) -> dict:
-    res = await federation.search(a["query"], scope=a.get("scope"), sources=a.get("sources"), k=int(a.get("k", 8)))
+async def _t_search(a: dict, principal: Principal) -> dict:
+    res = await federation.search(
+        a["query"], scope=a.get("scope"), sources=a.get("sources"), k=int(a.get("k", 8)), principal=principal
+    )
     return {"answer": res.answer, "passages": [p.__dict__ for p in res.passages]}
 
 
-async def _t_ground(a: dict) -> dict:
-    return await federation.ground(a["query"], scope=a.get("scope"), k=int(a.get("k", 8)))
+async def _t_ground(a: dict, principal: Principal) -> dict:
+    return await federation.ground(a["query"], scope=a.get("scope"), k=int(a.get("k", 8)), principal=principal)
 
 
-def _t_list_sources(a: dict) -> dict:
-    return {"sources": [s.__dict__ for s in federation.list_sources()]}
+def _t_list_sources(a: dict, principal: Principal) -> dict:
+    rows = [s.__dict__ for s in federation.list_sources()]
+    if not principal.is_admin:
+        for row in rows:
+            row["detail"] = ""
+    return {"sources": rows}
 
 
-def _t_get_doc(a: dict) -> dict:
-    return {"doc": get_doc(a["id"])}
+def _t_get_doc(a: dict, principal: Principal) -> dict:
+    doc = get_doc(a["id"])
+    if doc and not can_read_record(principal, doc):
+        raise AuthorizationError("document is outside the caller's visibility")
+    return {"doc": doc}
 
 
-def _t_list_docs(a: dict) -> dict:
-    return {"docs": list_docs()}
+def _t_list_docs(a: dict, principal: Principal) -> dict:
+    return {"docs": [doc for doc in list_docs() if can_read_record(principal, doc)]}
 
 
-def _t_doc_history(a: dict) -> dict:
+def _t_doc_history(a: dict, principal: Principal) -> dict:
+    doc = get_doc(a["id"])
+    if doc and not can_read_record(principal, doc):
+        raise AuthorizationError("document is outside the caller's visibility")
     return {"history": history(a["id"])}
 
 
-def _t_find_file(a: dict) -> dict:
-    return {"passages": [p.__dict__ for p in find_file(a["query"], int(a.get("k", 8)), a.get("scope"))]}
+def _t_find_file(a: dict, principal: Principal) -> dict:
+    scope = a.get("scope")
+    hits = find_file(a["query"], min(int(a.get("k", 8)), 50), scope, principal=principal)
+    return {"passages": [p.__dict__ for p in filter_passages(principal, hits, scope)]}
 
 
-def _t_deep_read(a: dict) -> dict:
-    return {"passages": [p.__dict__ for p in deep_read(a["path"], a.get("query", ""), int(a.get("k", 8)))]}
+def _t_deep_read(a: dict, principal: Principal) -> dict:
+    hits = deep_read(a["path"], a.get("query", ""), min(int(a.get("k", 8)), 50), principal=principal)
+    return {"passages": [p.__dict__ for p in filter_passages(principal, hits)]}
 
 
-def _t_upsert_doc(a: dict) -> dict:
-    return {"id": upsert_doc(a["path"], a["md"], a.get("scope", "global"), a.get("owner", "magic-unicorn"))}
+def _t_upsert_doc(a: dict, principal: Principal) -> dict:
+    scope, owner = authorized_write_target(principal, a.get("scope"), a.get("owner"))
+    doc_id = upsert_doc(a["path"], a["md"], scope, owner)
+    record_audit(principal.subject, "mcp.wiki.upsert", doc_id, "success", {"scope": scope})
+    return {"id": doc_id}
 
 
-def _t_record_metric(a: dict) -> dict:
-    return {"id": record_metric(a["name"], float(a["value"]), a.get("tags") or {})}
+def _t_record_metric(a: dict, principal: Principal) -> dict:
+    metric_id = record_metric(a["name"], float(a["value"]), a.get("tags") or {})
+    record_audit(principal.subject, "mcp.metric.record", a["name"], "success")
+    return {"id": metric_id}
 
 
 # manifest tool name -> handler (manifest is the single source of truth for the
 # names/schemas; this table is the execution half of each tool's `rest` mapping).
-_HANDLERS: dict[str, Callable[[dict], Any | Awaitable[Any]]] = {
+_HANDLERS: dict[str, Callable[[dict, Principal], Any | Awaitable[Any]]] = {
     "search": _t_search,
     "ground": _t_ground,
     "list_sources": _t_list_sources,
@@ -130,13 +158,13 @@ def _tool_content(payload: Any, is_error: bool = False) -> dict:
     return res
 
 
-async def _call_tool(name: str, arguments: dict) -> dict:
+async def _call_tool(name: str, arguments: dict, principal: Principal) -> dict:
     bare = (name or "").split(".")[-1]  # tolerate a `knowledge.` namespace prefix
     handler = _HANDLERS.get(bare)
     if handler is None:
         return _tool_content({"error": f"unknown tool: {name}"}, is_error=True)
     try:
-        result = handler(arguments or {})
+        result = handler(arguments or {}, principal)
         if inspect.isawaitable(result):
             result = await result
         return _tool_content(result)
@@ -145,6 +173,14 @@ async def _call_tool(name: str, arguments: dict) -> dict:
     except Exception as exc:  # never 500 the broker; surface as an MCP tool error
         logger.exception("tools/call %s failed", name)
         return _tool_content({"error": f"{type(exc).__name__}: {exc}"}, is_error=True)
+
+
+def _required_scopes(name: str) -> list[str]:
+    bare = (name or "").split(".")[-1]
+    for tool in _load_manifest_tools():
+        if tool.get("name") == bare:
+            return [str(scope) for scope in tool.get("scopes_required") or []]
+    return []
 
 
 async def handle(message: dict, authorization: str | None = None) -> tuple[int, dict | None]:
@@ -172,12 +208,18 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
         return 200, _rpc_result(req_id, {"tools": list_tools()})
     if method == "tools/call":
         try:
-            require_for_tool_call(authorization)
-        except AuthError as exc:
+            principal = require_tool_principal(authorization)
+        except AuthorizationError as exc:
             return 401, _rpc_error(req_id, -32001, f"unauthorized: {exc}")
         name = params.get("name", "")
+        try:
+            principal.require(*_required_scopes(name))
+        except AuthorizationError as exc:
+            record_audit(principal.subject, "mcp.tool", name, "denied", {"reason": str(exc)})
+            return 403, _rpc_error(req_id, -32003, f"forbidden: {exc}")
         arguments = params.get("arguments") or {}
-        result = await _call_tool(name, arguments)
+        result = await _call_tool(name, arguments, principal)
+        record_audit(principal.subject, "mcp.tool", name, "success" if not result.get("isError") else "error")
         return 200, _rpc_result(req_id, result)
 
     return 200, _rpc_error(req_id, -32601, f"method not found: {method}")

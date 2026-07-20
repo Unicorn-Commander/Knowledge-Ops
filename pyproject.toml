@@ -1,28 +1,41 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "knowledge-ops"
-version = "0.1.0"
-description = "Magic Unicorn federated grounding layer"
+version = "0.2.0"
+description = "Magic Unicorn governed evidence and memory layer"
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi>=0.110",
-  "uvicorn>=0.27",
-  "pydantic>=2",
-  "httpx>=0.26",
-  "psycopg[binary]>=3.1",
+  "fastapi==0.139.2",
+  "uvicorn==0.40.0",
+  "pydantic==2.12.5",
+  "httpx==0.28.1",
+  "psycopg[binary]==3.2.9",
+  "PyYAML==6.0.3",
   # /mcp Brigade-JWT verification (lazy: only used when KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1)
-  "pyjwt[crypto]>=2.8",
+  "pyjwt[crypto]==2.13.0",
 ]
 
 [project.optional-dependencies]
 # MCP stdio runtime (kb.* tools for Brigade / Claude Desktop / Cursor).
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp==1.28.1"]
 # Live store adapters: Qdrant uses httpx (already a core dep); FalkorDB needs a
 # RedisGraph client. Install with: pip install 'knowledge-ops[live]'
-live = ["redis>=5"]
-all = ["mcp>=1.0.0", "redis>=5"]
+live = ["redis==5.3.1"]
+all = ["mcp==1.28.1", "redis==5.3.1"]
+test = ["pytest==9.0.2"]
 
 [project.scripts]
 knowledge-ops = "knowledge_ops.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["knowledge_ops*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+knowledge_ops = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
