@@ -26,20 +26,26 @@ from typing import Optional
 
 import httpx
 
+from . import __version__
 from .config import settings
 
 logger = logging.getLogger("knowledge_ops.auth")
 
 # Brigade's edge (nginx) rejects the default urllib User-Agent with 403; send a real one.
-_USER_AGENT = "knowledge-ops/0.1 (+https://knowledge-ops.magicunicorn.dev)"
+_USER_AGENT = f"knowledge-ops/{__version__} (+https://knowledge-ops.magicunicorn.dev)"
 
 _jwks_lock = threading.Lock()
 _jwks_keys: dict[str, dict] = {}   # kid -> JWK dict
 _jwks_fetched_at: float = 0.0
+_jwks_stale_fallback_total = 0
 
 
 class AuthError(Exception):
     """Raised when an enforced Brigade JWT is missing or invalid (-> HTTP 401)."""
+
+
+def jwks_stale_fallback_total() -> int:
+    return _jwks_stale_fallback_total
 
 
 def _fetch_jwks() -> dict[str, dict]:
@@ -52,19 +58,25 @@ def _signing_key_for(kid: str):
     """Return a public key object for ``kid`` from Brigade's JWKS (cached, refresh-on-miss)."""
     import jwt as pyjwt
 
-    global _jwks_fetched_at, _jwks_keys
+    global _jwks_fetched_at, _jwks_keys, _jwks_stale_fallback_total
     with _jwks_lock:
-        fresh = (time.time() - _jwks_fetched_at) < settings.mcp_jwks_ttl
+        current = time.time()
+        age = max(0.0, current - _jwks_fetched_at)
+        ttl = max(0, settings.mcp_jwks_ttl)
+        fresh = age < ttl
         if kid not in _jwks_keys or not fresh:
             try:
                 _jwks_keys = _fetch_jwks()
                 _jwks_fetched_at = time.time()
             except Exception as exc:
-                if kid not in _jwks_keys:  # nothing usable cached -> fail closed
-                    raise AuthError(f"jwks fetch failed: {exc}") from exc
+                max_age = ttl + max(0, settings.mcp_jwks_max_stale_seconds)
+                fallback_age = max(0.0, time.time() - _jwks_fetched_at)
+                if kid not in _jwks_keys or fallback_age > max_age:
+                    raise AuthError("jwks_unavailable") from exc
+                _jwks_stale_fallback_total += 1
         jwk = _jwks_keys.get(kid)
     if jwk is None:
-        raise AuthError(f"unknown signing key kid={kid}")
+        raise AuthError("unknown_signing_key")
     return pyjwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
 
 
@@ -80,19 +92,19 @@ def bearer_token(authorization: Optional[str]) -> Optional[str]:
 def verify_brigade_jwt(token: Optional[str]) -> dict:
     """Validate a Brigade-minted RS256 JWT. Returns the claims or raises AuthError."""
     if not token:
-        raise AuthError("missing bearer token")
+        raise AuthError("missing_bearer_token")
     try:
         import jwt as pyjwt
     except ModuleNotFoundError as exc:  # pragma: no cover - image always ships pyjwt
-        raise AuthError("jwt verification unavailable") from exc
+        raise AuthError("verification_unavailable") from exc
 
     try:
         header = pyjwt.get_unverified_header(token)
     except Exception as exc:
-        raise AuthError(f"malformed token: {exc}") from exc
+        raise AuthError("malformed_token") from exc
     kid = header.get("kid")
     if not kid:
-        raise AuthError("token missing kid")
+        raise AuthError("missing_signing_key")
 
     key = _signing_key_for(kid)
     try:
@@ -105,11 +117,11 @@ def verify_brigade_jwt(token: Optional[str]) -> dict:
             leeway=settings.mcp_jwt_leeway,
         )
     except Exception as exc:  # pyjwt raises a family of exceptions; collapse to AuthError
-        raise AuthError(f"invalid token: {exc}") from exc
+        raise AuthError("invalid_token") from exc
 
     iss = claims.get("iss")
     if settings.mcp_trusted_issuers and iss not in settings.mcp_trusted_issuers:
-        raise AuthError(f"untrusted issuer: {iss}")
+        raise AuthError("untrusted_issuer")
     return claims
 
 
@@ -122,5 +134,5 @@ def require_for_tool_call(authorization: Optional[str]) -> Optional[dict]:
     if not settings.mcp_require_jwt:
         return None
     claims = verify_brigade_jwt(bearer_token(authorization))
-    logger.info("brigade mcp tools/call authorized: sub=%s jti=%s", claims.get("sub"), claims.get("jti"))
+    logger.info("brigade mcp tools/call authorized")
     return claims

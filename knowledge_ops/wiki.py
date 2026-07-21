@@ -11,6 +11,7 @@ from typing import Callable
 from .config import settings
 from .authorization import AuthorizationError, Principal, can_read_record, sqlite_visibility_clause
 from .models import Passage
+from .operations import sanitize_error
 from .storage import connect, init_db, json_dumps, now, record_audit
 from .text import chunk_text_with_spans, lexical_score, stable_id
 
@@ -280,15 +281,21 @@ def upsert_documents_atomic(
         for doc in prepared:
             try:
                 os.replace(doc["staged"], doc["disk_path"])
-            except OSError:
+            except OSError as exc:
                 # SQLite is canonical and already committed. Startup reconciliation
                 # repairs this projection without exposing a partial DB publication.
-                logger.exception("markdown projection failed for %s", doc["path"])
+                logger.error(
+                    "markdown projection failed code=%s",
+                    sanitize_error(exc, category="markdown_projection_failed"),
+                )
         for retired_path in retired_paths:
             try:
                 retired_path.unlink(missing_ok=True)
-            except OSError:
-                logger.exception("retired markdown projection cleanup failed for %s", retired_path)
+            except OSError as exc:
+                logger.error(
+                    "retired markdown cleanup failed code=%s",
+                    sanitize_error(exc, category="markdown_cleanup_failed"),
+                )
     finally:
         for doc in prepared:
             doc.get("staged", Path("/nonexistent")).unlink(missing_ok=True)
@@ -524,8 +531,11 @@ def _reconcile_deletion(deletion_id: str) -> dict:
         try:
             disk_path.unlink(missing_ok=True)
             projections["markdown"] = "success"
-        except OSError:
-            logger.exception("markdown deletion remains pending for %s", event["path"])
+        except OSError as exc:
+            logger.error(
+                "markdown deletion remains pending code=%s",
+                sanitize_error(exc, category="markdown_deletion_pending"),
+            )
             projections["markdown"] = "pending"
 
     if projections.get("openwiki_staging") in {"pending", "success"}:
@@ -536,9 +546,27 @@ def _reconcile_deletion(deletion_id: str) -> dict:
             outcome = purge_staging_references(source_id)
             projections["_openwiki_snapshots_purged"] = outcome["snapshots_purged"]
             projections["openwiki_staging"] = "success"
-        except (OSError, ValueError, json.JSONDecodeError):
-            logger.exception("OpenWiki deletion remains pending for %s", source_id)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.error(
+                "OpenWiki deletion remains pending code=%s",
+                sanitize_error(exc, category="openwiki_deletion_pending"),
+            )
             projections["openwiki_staging"] = "pending"
+
+    if "source_owner_outbox" in projections:
+        with connect() as db:
+            states = [str(row["status"]) for row in db.execute(
+                "SELECT status FROM deletion_outbox WHERE deletion_id=?",
+                (deletion_id,),
+            )]
+        if states and all(state == "succeeded" for state in states):
+            projections["source_owner_outbox"] = "success"
+        elif any(state == "failed" for state in states):
+            projections["source_owner_outbox"] = "failed"
+        elif not states and projections.get("source_owner_outbox") == "failed":
+            pass
+        else:
+            projections["source_owner_outbox"] = "pending"
 
     with connect() as db:
         db.execute(
@@ -548,13 +576,25 @@ def _reconcile_deletion(deletion_id: str) -> dict:
     return _deletion_result(event, projections)
 
 
-def reconcile_pending_deletions() -> dict[str, int]:
-    """Retry projection cleanup for every incomplete tombstone at startup."""
+def reconcile_pending_deletions(*, include_completed: bool = False) -> dict[str, int]:
+    """Retry pending projections, optionally rechecking every retained receipt."""
     init_db()
     with connect() as db:
-        deletion_ids = [str(row["deletion_id"]) for row in db.execute(
-            "SELECT deletion_id FROM deletion_events ORDER BY deleted_at"
-        )]
+        if include_completed:
+            rows = db.execute(
+                "SELECT deletion_id FROM deletion_events ORDER BY deleted_at"
+            )
+        else:
+            rows = db.execute(
+                """SELECT deletion_id FROM deletion_events
+                   WHERE EXISTS (
+                     SELECT 1 FROM json_each(deletion_events.projections_json)
+                     WHERE substr(json_each.key, 1, 1) != '_'
+                       AND json_each.value='pending'
+                   )
+                   ORDER BY deleted_at"""
+            )
+        deletion_ids = [str(row["deletion_id"]) for row in rows]
     completed = pending = 0
     for deletion_id in deletion_ids:
         result = _reconcile_deletion(deletion_id)
@@ -629,6 +669,10 @@ def tombstone_doc(doc_id_or_path: str, *, principal: Principal, reason: str) -> 
                 "_openwiki_source_id": source_id,
             }
             deletion_id = stable_id(f"delete:{doc['id']}:{timestamp}")
+            source_type = str(provenance["source_type"]) if provenance else ""
+            external_source_id = str(provenance["source_id"]) if provenance else ""
+            if source_type and source_type != "openwiki":
+                projections["source_owner_outbox"] = "pending"
             db.execute(
                 """INSERT INTO deletion_events(
                      deletion_id, doc_id, path, actor, reason, deleted_at, projections_json
@@ -638,6 +682,64 @@ def tombstone_doc(doc_id_or_path: str, *, principal: Principal, reason: str) -> 
                     reason[:1000], timestamp, json_dumps(projections),
                 ),
             )
+            if source_type and source_type != "openwiki":
+                from .operations import (
+                    credential_free_source_ref,
+                    enqueue_deletion_task,
+                    sanitize_error,
+                )
+
+                adapter = settings.deletion_targets.get(source_type, source_type)
+                source_ref = f"{source_type}:{external_source_id}"
+                initial_error = None
+                if not external_source_id.strip():
+                    projections["source_owner_outbox"] = "failed"
+                    projections["_source_owner_outbox_error"] = sanitize_error(
+                        "missing source identifier",
+                        category="source_contract",
+                        exception_type="MissingSourceId",
+                    )
+                    db.execute(
+                        "UPDATE deletion_events SET projections_json=? WHERE deletion_id=?",
+                        (json_dumps(projections), deletion_id),
+                    )
+                    source_ref = ""
+                try:
+                    if source_ref:
+                        credential_free_source_ref(source_ref)
+                except ValueError as exc:
+                    projections["source_owner_outbox"] = "failed"
+                    projections["_source_owner_outbox_error"] = sanitize_error(
+                        exc,
+                        category="source_contract",
+                        exception_type="InvalidSourceRef",
+                    )
+                    db.execute(
+                        "UPDATE deletion_events SET projections_json=? WHERE deletion_id=?",
+                        (json_dumps(projections), deletion_id),
+                    )
+                    source_ref = ""
+                try:
+                    if source_ref:
+                        enqueue_deletion_task(
+                            deletion_id,
+                            adapter=adapter,
+                            source_ref=source_ref,
+                            at=timestamp,
+                            initial_error=initial_error,
+                            db=db,
+                        )
+                except ValueError as exc:
+                    projections["source_owner_outbox"] = "failed"
+                    projections["_source_owner_outbox_error"] = sanitize_error(
+                        exc,
+                        category="source_contract",
+                        exception_type="InvalidAdapter",
+                    )
+                    db.execute(
+                        "UPDATE deletion_events SET projections_json=? WHERE deletion_id=?",
+                        (json_dumps(projections), deletion_id),
+                    )
 
     result = _reconcile_deletion(deletion_id)
     record_audit(

@@ -1,7 +1,7 @@
 {
   "$schema": "https://unicorncommander.ai/schemas/mcps-manifest-v1.json",
   "name": "Knowledge-Ops",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Magic Unicorn governed evidence retrieval layer. Agents call knowledge.search / knowledge.ground; the service federates authorized stores, returns cited evidence excerpts, and labels automated grounding as heuristic rather than verified. Storage-opaque: agents never touch backing stores directly.",
   "tool_namespace": "knowledge",
   "mcp_endpoint": "https://knowledge-ops.magicunicorn.dev/mcp",

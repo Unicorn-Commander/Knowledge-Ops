@@ -21,7 +21,7 @@
       </a>
       <div class="nav__status" id="navStatus" title="Service status" role="status" aria-live="polite">
         <span class="dot" id="statusDot"></span>
-        <span id="statusText">checking…</span>
+        <span id="statusText">Checking</span>
       </div>
     </div>
   </header>
@@ -181,6 +181,10 @@
         <div class="grid grid--2 ops-grid">
           <div><h3 class="subhead">Jobs</h3><div class="list" id="refreshJobs"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
           <div><h3 class="subhead">Recent runs</h3><div class="list" id="refreshRuns"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
+        </div>
+        <div class="grid grid--2 ops-grid">
+          <div><h3 class="subhead">Scheduler worker</h3><div class="list" id="workerState"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
+          <div><h3 class="subhead">Deletion propagation</h3><div class="list" id="deletionOutbox"><div class="loading"><span class="spinner"></span> loading...</div></div></div>
         </div>
         <h2 class="section">Recent changes</h2>
         <div class="list" id="auditResult"><div class="loading"><span class="spinner"></span> loading...</div></div>

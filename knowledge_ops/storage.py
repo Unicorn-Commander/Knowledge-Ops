@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import json
+import os
+import re
 import sqlite3
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from .config import settings
 from .models import utcnow
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -109,17 +114,164 @@ def _migrate_v1(db: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v2(db: sqlite3.Connection) -> None:
+    for definition in (
+        "attempt_count INTEGER NOT NULL DEFAULT 0",
+        "max_attempts INTEGER NOT NULL DEFAULT 5",
+        "next_attempt_at TEXT",
+        "lease_owner TEXT",
+        "lease_token TEXT",
+        "lease_expires_at TEXT",
+        "heartbeat_at TEXT",
+    ):
+        _add_column(db, "refresh_runs", definition)
+
+    db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_refresh_runs_dispatch
+          ON refresh_runs(status, next_attempt_at, lease_expires_at, scheduled_for);
+
+        CREATE TABLE IF NOT EXISTS worker_heartbeats (
+          worker_id TEXT PRIMARY KEY,
+          worker_kind TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          heartbeat_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          detail_json TEXT NOT NULL DEFAULT '{}',
+          shutdown_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_status
+          ON worker_heartbeats(status, heartbeat_at DESC);
+
+        CREATE TABLE IF NOT EXISTS deletion_outbox (
+          task_id TEXT PRIMARY KEY,
+          deletion_id TEXT NOT NULL,
+          adapter TEXT NOT NULL,
+          source_ref TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          max_attempts INTEGER NOT NULL DEFAULT 5,
+          next_attempt_at TEXT NOT NULL,
+          lease_owner TEXT,
+          lease_token TEXT,
+          lease_expires_at TEXT,
+          heartbeat_at TEXT,
+          last_error TEXT,
+          result_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT,
+          UNIQUE(deletion_id, adapter, source_ref),
+          FOREIGN KEY(deletion_id) REFERENCES deletion_events(deletion_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_deletion_outbox_dispatch
+          ON deletion_outbox(status, next_attempt_at, lease_expires_at);
+        CREATE INDEX IF NOT EXISTS idx_deletion_outbox_deletion
+          ON deletion_outbox(deletion_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS source_health (
+          source_ref TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '',
+          checked_at TEXT NOT NULL,
+          last_success_at TEXT,
+          last_failure_at TEXT
+        );
+        """
+    )
+    db.execute(
+        """UPDATE refresh_runs
+           SET next_attempt_at=coalesce(scheduled_for, started_at)
+           WHERE status='pending' AND next_attempt_at IS NULL"""
+    )
+
+
+def _migrate_v3(db: sqlite3.Connection) -> None:
+    """Snapshot queued contracts and record verified-email ownership upgrades."""
+    _add_column(db, "refresh_runs", "kind_snapshot TEXT")
+    _add_column(db, "refresh_runs", "source_ref_snapshot TEXT")
+    db.execute(
+        """UPDATE refresh_runs
+           SET kind_snapshot=coalesce(
+                 kind_snapshot,
+                 (SELECT kind FROM refresh_jobs WHERE refresh_jobs.job_id=refresh_runs.job_id)
+               ),
+               source_ref_snapshot=coalesce(
+                 source_ref_snapshot,
+                 (SELECT source_ref FROM refresh_jobs WHERE refresh_jobs.job_id=refresh_runs.job_id)
+               )
+           WHERE kind_snapshot IS NULL OR source_ref_snapshot IS NULL"""
+    )
+    missing_contract = (
+        "refresh_contract_missing:Migration:"
+        + hashlib.sha256(b"refresh-contract-missing-v3").hexdigest()[:16]
+    )
+    db.execute(
+        """UPDATE refresh_runs
+           SET status='failed', completed_at=coalesce(completed_at, ?),
+               next_attempt_at=NULL, error=coalesce(error, ?),
+               lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
+               heartbeat_at=NULL
+           WHERE status IN ('pending', 'running')
+             AND (kind_snapshot IS NULL OR source_ref_snapshot IS NULL)""",
+        (now(), missing_contract),
+    )
+    db.execute(
+        """UPDATE refresh_runs
+           SET kind_snapshot=coalesce(kind_snapshot, 'legacy-unresolved'),
+               source_ref_snapshot=coalesce(source_ref_snapshot, 'legacy-unresolved')
+           WHERE kind_snapshot IS NULL OR source_ref_snapshot IS NULL"""
+    )
+    db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_refresh_runs_contract_dispatch
+          ON refresh_runs(status, kind_snapshot, source_ref_snapshot, next_attempt_at);
+
+        CREATE TABLE IF NOT EXISTS identity_ownership_migrations (
+          issuer TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          email_sha256 TEXT NOT NULL,
+          wiki_docs_updated INTEGER NOT NULL,
+          file_chunks_updated INTEGER NOT NULL,
+          migrated_at TEXT NOT NULL,
+          PRIMARY KEY(issuer, subject, email_sha256)
+        );
+        """
+    )
+
+
 def connect() -> sqlite3.Connection:
     settings.ensure_dirs()
-    conn = sqlite3.connect(settings.db_path)
+    database_path = settings.db_path.expanduser()
+    database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    conn = sqlite3.connect(database_path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
+@contextmanager
+def _migration_lock() -> Iterator[None]:
+    settings.ensure_dirs()
+    database_path = settings.db_path.expanduser().resolve()
+    database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock_path = database_path.with_name(f".{database_path.name}.schema-migration.lock")
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def init_db() -> None:
-    with connect() as db:
-        db.executescript(
-            """
+    with _migration_lock():
+        with connect() as db:
+            db.executescript(
+                """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS wiki_docs (
               id TEXT PRIMARY KEY,
@@ -202,12 +354,30 @@ def init_db() -> None:
               version INTEGER PRIMARY KEY,
               applied_at TEXT NOT NULL
             );
-            """
-        )
-        applied = {int(row["version"]) for row in db.execute("SELECT version FROM schema_migrations")}
-        if 1 not in applied:
-            _migrate_v1(db)
-            db.execute("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)", (1, now()))
+                """
+            )
+            applied = {
+                int(row["version"])
+                for row in db.execute("SELECT version FROM schema_migrations")
+            }
+            if 1 not in applied:
+                _migrate_v1(db)
+                db.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (1, now()),
+                )
+            if 2 not in applied:
+                _migrate_v2(db)
+                db.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (2, now()),
+                )
+            if 3 not in applied:
+                _migrate_v3(db)
+                db.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (3, now()),
+                )
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -236,6 +406,97 @@ def record_audit(actor: str, action: str, resource: str, outcome: str, details: 
             (actor[:200], action[:120], resource[:500], outcome[:40], json_dumps(clean_details), now()),
         )
         return int(row.lastrowid)
+
+
+def migrate_verified_email_ownership(
+    *,
+    issuer: str,
+    subject: str,
+    verified_email: str,
+) -> dict[str, Any]:
+    """Move native personal rows from a verified legacy email owner to OIDC ``sub``.
+
+    The email itself is used only as a bound update value. Durable migration and
+    audit receipts retain a digest, never the address.
+    """
+    clean_issuer = issuer.strip()
+    clean_subject = subject.strip()
+    clean_email = verified_email.strip().casefold()
+    if not clean_issuer or len(clean_issuer) > 500:
+        raise ValueError("verified ownership migration requires a bounded issuer")
+    if not clean_subject or len(clean_subject) > 200:
+        raise ValueError("verified ownership migration requires a bounded subject")
+    if (
+        len(clean_email) > 320
+        or not re.fullmatch(r"[^\s@]{1,64}@[^\s@]{1,255}", clean_email)
+        or any(ord(char) < 32 for char in clean_email)
+    ):
+        raise ValueError("verified ownership migration requires a valid email alias")
+
+    init_db()
+    email_sha256 = hashlib.sha256(clean_email.encode("utf-8")).hexdigest()
+    timestamp = now()
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT wiki_docs_updated, file_chunks_updated, migrated_at
+               FROM identity_ownership_migrations
+               WHERE issuer=? AND subject=? AND email_sha256=?""",
+            (clean_issuer, clean_subject, email_sha256),
+        ).fetchone()
+        if existing:
+            return {
+                "migrated": False,
+                "email_sha256": email_sha256,
+                "wiki_docs_updated": int(existing["wiki_docs_updated"]),
+                "file_chunks_updated": int(existing["file_chunks_updated"]),
+                "migrated_at": str(existing["migrated_at"]),
+            }
+        wiki_docs_updated = db.execute(
+            """UPDATE wiki_docs SET owner=?
+               WHERE scope='personal' AND lower(owner)=? AND lower(owner) != lower(?)""",
+            (clean_subject, clean_email, clean_subject),
+        ).rowcount
+        file_chunks_updated = db.execute(
+            """UPDATE file_chunks SET owner=?
+               WHERE scope='personal' AND lower(owner)=? AND lower(owner) != lower(?)""",
+            (clean_subject, clean_email, clean_subject),
+        ).rowcount
+        db.execute(
+            """INSERT INTO identity_ownership_migrations(
+                 issuer, subject, email_sha256, wiki_docs_updated,
+                 file_chunks_updated, migrated_at
+               ) VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                clean_issuer,
+                clean_subject,
+                email_sha256,
+                wiki_docs_updated,
+                file_chunks_updated,
+                timestamp,
+            ),
+        )
+        db.execute(
+            """INSERT INTO audit_events(
+                 actor, action, resource, outcome, details_json, recorded_at
+               ) VALUES (?, 'identity.owner_migrate', ?, 'success', ?, ?)""",
+            (
+                clean_subject,
+                f"email-sha256:{email_sha256[:16]}",
+                json_dumps({
+                    "file_chunks_updated": str(file_chunks_updated),
+                    "wiki_docs_updated": str(wiki_docs_updated),
+                }),
+                timestamp,
+            ),
+        )
+    return {
+        "migrated": True,
+        "email_sha256": email_sha256,
+        "wiki_docs_updated": wiki_docs_updated,
+        "file_chunks_updated": file_chunks_updated,
+        "migrated_at": timestamp,
+    }
 
 
 def audit_rows(limit: int = 100) -> list[dict[str, Any]]:

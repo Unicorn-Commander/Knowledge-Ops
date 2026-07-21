@@ -151,7 +151,7 @@ REST and Postgres adapters are disabled unless `enforces_authorization=true` exp
 - Every `/kb.*` data request is authorized inside the app with a verified Keycloak or Brigade token; edge SSO alone is not authorization.
 - Brigade calls `/mcp` with an RS256 JWT, `aud=knowledge-ops`, and every tool enforces its manifest scopes.
 - Omitted scope means shared global plus the caller's own personal knowledge. `all`, restricted sources, global writes, indexing, and OpenWiki promotion require explicit privileges.
-- Personal owner values are derived from verified token identity, never request input. Unknown source classification is restricted, not global.
+- Personal owner values are derived from verified token identity, never request input. For OIDC, stable `sub` is authoritative and email is a legacy alias only when `email_verified` is exactly `true`; schema v3 transactionally moves native email-owned rows to `sub` and stores only an alias digest in its receipt. Mutable usernames do not confer ownership. Unknown source classification is restricted, not global.
 - Wiki paths and file roots are confined and symlinks are rejected. Request body, rate, and result-count bounds are enforced.
 - SQLite is canonical for wiki documents; atomic Markdown projections are reconciled at startup after a crash.
 - Federated adapters are read-only. Qdrant uses search only; FalkorDB uses `GRAPH.RO_QUERY`; Postgres queries are read-only `SELECT`.
@@ -189,7 +189,7 @@ Bigboy:
 
 ```bash
 rsync -az --delete --exclude .git ./ magicunicorn:/home/muut/Knowledge-Ops/
-ssh magicunicorn 'cd /home/muut/Knowledge-Ops && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml up -d --build'
+ssh magicunicorn 'cd /home/muut/Knowledge-Ops && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker up -d --build'
 ```
 
 Verify:
@@ -197,12 +197,16 @@ Verify:
 ```bash
 curl -s https://knowledge-ops.magicunicorn.dev/health
 curl -s https://knowledge-ops.magicunicorn.dev/.well-known/mcps.json
+ssh magicunicorn "cd /home/muut/Knowledge-Ops && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker exec -T knowledge-ops python -c 'import json,urllib.request; value=json.load(urllib.request.urlopen(\"http://127.0.0.1:8765/ready\")); assert value[\"ok\"] and value[\"checks\"][\"worker\"]; print(json.dumps(value))'"
 ```
+
+`/health` proves only that the API process is alive. Production acceptance
+requires the internal `/ready` assertion above to report a fresh worker.
 
 Rollback deploy:
 
 ```bash
-ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.bak-pre-gui-20260627 docker-compose.bigboy.yml && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml up -d --build'
+ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.bak-pre-gui-20260627 docker-compose.bigboy.yml && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker up -d --build'
 ```
 
 ## Tests
@@ -210,13 +214,20 @@ ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.ba
 ```bash
 python3 -m pytest -q
 python3 -m knowledge_ops.cli evaluate-memory
+docker compose --profile worker config --quiet
 ```
 
 The memory evaluation is deterministic, isolated, and offline. Production
-refresh execution still requires an operator-managed scheduler and credentialed
-connector workers; Knowledge-Ops stores only credential-free job contracts.
+refresh scheduling is handled by the durable worker profile. Live connector and
+source-owner deletion adapters remain disabled until an operator explicitly
+wires their process-owned authentication. Knowledge-Ops stores only
+credential-free job and outbox contracts. See
+[Operations Runbook](docs/OPERATIONS-RUNBOOK.md) for worker, alerting, backup,
+restore, and external dependency procedures.
 
 Runtime dependencies are pinned with artifact hashes in `requirements.lock`.
+CI also scans the built production image for high and critical vulnerabilities
+and retains a CycloneDX image SBOM with each successful verification run.
 Regenerate it with Python 3.12 and `pip-tools==7.6.0` after changing project
 dependencies:
 

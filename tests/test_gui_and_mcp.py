@@ -10,6 +10,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.test_federation import _seed_tmp_env  # reuse the seeded tmp env helper
@@ -53,11 +54,19 @@ def test_static_files_present_on_disk():
 
 def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     html = (STATIC / "index.html").read_text()
+    css = (STATIC / "styles.css").read_text()
     js = (STATIC / "app.js").read_text()
     assert 'class="skip-link"' in html
     assert 'id="mainContent"' in html and 'aria-live="polite"' in html
     assert "fonts.googleapis.com" not in html
     assert "onclick=" not in html and "onclick=" not in js
+    assert html.count('class="side__btn') == 6
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
+    assert ".nav__status { font-size: 0; }" not in css
+    mobile_css = css.split("@media (max-width: 860px)", 1)[1]
+    assert "overflow-x: auto" not in mobile_css.split("@media", 1)[0]
+    assert '>Ready<' not in html and '>Checking<' in html
+    assert 'textContent = "Ready"' in js and 'textContent = "Offline"' in js
 
 
 def test_info_route(tmp_path, monkeypatch):
@@ -145,12 +154,42 @@ def test_mcp_jwt_gate_blocks_anonymous_tools_call_when_enforced(tmp_path, monkey
         # tools/call without a token -> 401 (not a server error)
         r = c.post("/mcp", json={
             "jsonrpc": "2.0", "id": 7, "method": "tools/call",
-            "params": {"name": "ground", "arguments": {"query": "x"}},
+            "params": {
+                "name": "person@example.test?token=secret",
+                "arguments": {"query": "x"},
+            },
         })
         assert r.status_code == 401 and r.json()["error"]["code"] == -32001
         # initialize + tools/list remain reachable (only public manifest metadata)
         assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 8, "method": "tools/list"}).status_code == 200
         assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "initialize"}).status_code == 200
+    from knowledge_ops.storage import connect
+
+    with connect() as db:
+        rows = [dict(row) for row in db.execute(
+            "SELECT resource, details_json FROM audit_events WHERE action='auth.mcp.authentication'"
+        )]
+    persisted = json.dumps(rows)
+    assert rows[-1]["resource"] == "tools/call"
+    assert "person@example.test" not in persisted and "token=secret" not in persisted
+
+
+def test_unhandled_request_log_uses_only_a_finite_error_receipt(caplog):
+    import asyncio
+    import logging
+    from starlette.requests import Request
+    import knowledge_ops.api as api
+
+    caplog.set_level(logging.ERROR, logger="knowledge_ops")
+    request = Request({"type": "http", "method": "GET", "path": "/secret/value"})
+    response = asyncio.run(api._on_unhandled(
+        request,
+        RuntimeError("password=hunter2 person@example.test"),
+    ))
+    assert response.status_code == 500
+    assert "hunter2" not in caplog.text and "person@example.test" not in caplog.text
+    assert "/secret/value" not in caplog.text
+    assert "request_failed:RuntimeError:" in caplog.text
 
 
 def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
@@ -188,9 +227,9 @@ def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
         ok = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint()}"})
         assert ok.status_code == 200 and ok.json()["result"]["isError"] is False
         bad_aud = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(aud='other-app')}"})
-        assert bad_aud.status_code == 401
+        assert bad_aud.status_code == 401 and "other-app" not in bad_aud.text
         bad_iss = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(iss='https://evil.example')}"})
-        assert bad_iss.status_code == 401
+        assert bad_iss.status_code == 401 and "evil.example" not in bad_iss.text
         missing_scope = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(scope='')}"})
         assert missing_scope.status_code == 403
         write_call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
@@ -198,3 +237,70 @@ def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
         }}
         denied_write = c.post("/mcp", json=write_call, headers={"Authorization": f"Bearer {mint()}"})
         assert denied_write.status_code == 403
+
+
+def test_mcp_jwks_cache_has_a_bounded_stale_grace(monkeypatch):
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import knowledge_ops.brigade_auth as ba
+    import knowledge_ops.config as config
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = json.loads(pyjwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    public.update({"kid": "cached", "alg": "RS256", "use": "sig"})
+    monkeypatch.setattr(ba, "_jwks_keys", {"cached": public})
+    monkeypatch.setattr(ba, "_jwks_fetched_at", 100.0)
+    monkeypatch.setattr(ba, "_jwks_stale_fallback_total", 0)
+    monkeypatch.setattr(ba, "_fetch_jwks", lambda: (_ for _ in ()).throw(OSError("secret")))
+    monkeypatch.setattr(config.settings, "mcp_jwks_ttl", 60)
+    monkeypatch.setattr(config.settings, "mcp_jwks_max_stale_seconds", 30)
+
+    monkeypatch.setattr(ba.time, "time", lambda: 189.0)
+    assert ba._signing_key_for("cached") is not None
+    assert ba.jwks_stale_fallback_total() == 1
+    monkeypatch.setattr(ba.time, "time", lambda: 191.0)
+    with pytest.raises(ba.AuthError, match="jwks_unavailable"):
+        ba._signing_key_for("cached")
+
+    clock = iter((189.0, 191.0))
+    monkeypatch.setattr(ba.time, "time", lambda: next(clock))
+    with pytest.raises(ba.AuthError, match="jwks_unavailable"):
+        ba._signing_key_for("cached")
+    assert ba.jwks_stale_fallback_total() == 1
+
+
+def test_mcp_jwks_errors_do_not_echo_fetch_or_key_details(monkeypatch):
+    import knowledge_ops.brigade_auth as ba
+    import knowledge_ops.config as config
+
+    monkeypatch.setattr(ba, "_jwks_keys", {})
+    monkeypatch.setattr(ba, "_jwks_fetched_at", 0.0)
+    monkeypatch.setattr(config.settings, "mcp_jwks_ttl", 60)
+    monkeypatch.setattr(config.settings, "mcp_jwks_max_stale_seconds", 30)
+    monkeypatch.setattr(
+        ba,
+        "_fetch_jwks",
+        lambda: (_ for _ in ()).throw(OSError("private-jwks-host?token=secret")),
+    )
+    with pytest.raises(ba.AuthError) as error:
+        ba._signing_key_for("private-kid")
+    assert str(error.value) == "jwks_unavailable"
+    assert "private-kid" not in str(error.value)
+    assert "private-jwks-host" not in str(error.value)
+
+
+def test_successful_mcp_auth_log_omits_subject_and_token_id(monkeypatch, caplog):
+    import logging
+    import knowledge_ops.brigade_auth as ba
+    import knowledge_ops.config as config
+
+    monkeypatch.setattr(config.settings, "mcp_require_jwt", True)
+    monkeypatch.setattr(
+        ba,
+        "verify_brigade_jwt",
+        lambda token: {"sub": "person@example.test", "jti": "secret-token-id"},
+    )
+    caplog.set_level(logging.INFO, logger="knowledge_ops.auth")
+    assert ba.require_for_tool_call("Bearer token") is not None
+    assert "person@example.test" not in caplog.text
+    assert "secret-token-id" not in caplog.text

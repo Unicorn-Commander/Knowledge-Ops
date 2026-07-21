@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import os
+import stat
 import tempfile
 from typing import Any
 
@@ -26,6 +27,11 @@ from .wiki import upsert_documents_atomic
 MAX_DOCUMENTS = 500
 MAX_DOCUMENT_BYTES = 1_000_000
 MAX_BUNDLE_BYTES = 50_000_000
+_CONTROL_DOCUMENTS = {"instructions.md", "_plan.md"}
+_FRONTMATTER = re.compile(
+    r"\A---(?:\r\n|\n)(?P<yaml>.*?)(?:\r\n|\n)---(?:(?:\r\n|\n)|\Z)",
+    re.DOTALL,
+)
 
 _SECRET_PATTERNS = {
     "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -66,21 +72,32 @@ def _allowed_source(source: Path) -> Path:
 
 
 def _frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    if not text.startswith("---\n"):
+    if not (text.startswith("---\n") or text.startswith("---\r\n")):
         return {}, text
-    end = text.find("\n---", 4)
-    if end < 0:
-        return {}, text
-    raw = text[4:end]
+    match = _FRONTMATTER.match(text)
+    if not match:
+        raise ValueError("OKF frontmatter has no exact closing delimiter")
+    raw = match.group("yaml")
     parsed = yaml.safe_load(raw) or {}
     if not isinstance(parsed, dict):
         raise ValueError("OKF frontmatter must be a mapping")
-    return parsed, text[end + 4:].lstrip("\n")
+    return parsed, text[match.end():]
+
+
+def _allows_untyped_reserved_document(path: str, metadata: dict[str, Any]) -> bool:
+    relative = Path(path)
+    if relative.name.lower() in {"log.md", "logs.md"}:
+        return True
+    if relative.name.lower() != "index.md":
+        return False
+    if len(relative.parts) > 1:
+        return True
+    return str(metadata.get("okf_version") or "") == "0.1"
 
 
 def _scan(path: str, text: str, metadata: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
-    if not metadata.get("type"):
+    if not metadata.get("type") and not _allows_untyped_reserved_document(path, metadata):
         findings.append(Finding(path, "okf", "blocking", "missing required OKF type"))
     if not metadata.get("source") and not metadata.get("source_uri"):
         findings.append(Finding(path, "provenance", "review", "upstream source provenance is not declared"))
@@ -96,36 +113,75 @@ def _scan(path: str, text: str, metadata: dict[str, Any]) -> list[Finding]:
     return findings
 
 
-def _bundle_files(source: Path) -> list[Path]:
-    files: list[Path] = []
+def _read_regular_file(root_fd: int, relative: Path) -> bytes:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("OpenWiki import requires no-follow filesystem support")
+    directory_fd = os.dup(root_fd)
+    try:
+        for part in relative.parts[:-1]:
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            relative.parts[-1],
+            os.O_RDONLY | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+        try:
+            if not stat.S_ISREG(os.fstat(file_fd).st_mode):
+                raise ValueError(f"OpenWiki Markdown entry is not a file: {relative.name}")
+            with os.fdopen(file_fd, "rb", closefd=False) as handle:
+                return handle.read(MAX_DOCUMENT_BYTES + 1)
+        finally:
+            os.close(file_fd)
+    except OSError as exc:
+        raise ValueError(f"OpenWiki document could not be opened safely: {relative.name}") from exc
+    finally:
+        os.close(directory_fd)
+
+
+def _bundle_files(source: Path) -> list[tuple[Path, bytes]]:
+    files: list[tuple[Path, bytes]] = []
     total = 0
-    for path in sorted(source.rglob("*.md")):
-        if path.is_symlink():
-            raise ValueError(f"OpenWiki bundle contains a symlink: {path.name}")
-        resolved = path.resolve()
-        if not resolved.is_relative_to(source):
-            raise ValueError("OpenWiki document escapes the bundle root")
-        size = resolved.stat().st_size
-        if size > MAX_DOCUMENT_BYTES:
-            raise ValueError(f"OpenWiki document exceeds {MAX_DOCUMENT_BYTES} bytes: {resolved.name}")
-        total += size
-        if total > MAX_BUNDLE_BYTES:
-            raise ValueError("OpenWiki bundle exceeds the ingestion size limit")
-        files.append(resolved)
-        if len(files) > MAX_DOCUMENTS:
-            raise ValueError("OpenWiki bundle exceeds the document limit")
+    root_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for path in sorted(item for item in source.rglob("*") if item.suffix.lower() == ".md"):
+            relative = path.relative_to(source)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if path.is_symlink():
+                raise ValueError(f"OpenWiki bundle contains a symlink: {path.name}")
+            if relative.name.lower() in _CONTROL_DOCUMENTS:
+                continue
+            source_bytes = _read_regular_file(root_fd, relative)
+            if len(source_bytes) > MAX_DOCUMENT_BYTES:
+                raise ValueError(
+                    f"OpenWiki document exceeds {MAX_DOCUMENT_BYTES} bytes: {relative.name}"
+                )
+            total += len(source_bytes)
+            if total > MAX_BUNDLE_BYTES:
+                raise ValueError("OpenWiki bundle exceeds the ingestion size limit")
+            files.append((source / relative, source_bytes))
+            if len(files) > MAX_DOCUMENTS:
+                raise ValueError("OpenWiki bundle exceeds the document limit")
+    finally:
+        os.close(root_fd)
     if not files:
         raise ValueError("OpenWiki bundle contains no Markdown documents")
     return files
 
 
-def _source_digest(source: Path, files: list[Path]) -> str:
+def _source_digest(source: Path, files: list[tuple[Path, bytes]]) -> str:
     digest = hashlib.sha256()
-    for path in files:
+    for path, source_bytes in files:
         rel = path.relative_to(source).as_posix()
         digest.update(rel.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(source_bytes)
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -160,7 +216,7 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
     docs_dir = destination / "documents"
     docs_dir.mkdir()
     try:
-        for source_file in files:
+        for source_file, source_bytes in files:
             rel = source_file.relative_to(source).as_posix()
             if f"openwiki/{rel}" in tombstoned_paths:
                 findings.append(Finding(
@@ -168,14 +224,14 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
                     "canonical path is tombstoned and cannot be restaged",
                 ))
                 continue
-            text = source_file.read_text(encoding="utf-8", errors="strict")
+            text = source_bytes.decode("utf-8", errors="strict")
             try:
                 metadata, _ = _frontmatter(text)
             except (TypeError, ValueError, yaml.YAMLError) as exc:
                 metadata = {}
                 findings.append(Finding(rel, "okf", "blocking", f"invalid frontmatter: {type(exc).__name__}"))
             findings.extend(_scan(rel, text, metadata))
-            content_digest = hashlib.sha256(text.encode()).hexdigest()
+            content_digest = hashlib.sha256(source_bytes).hexdigest()
             requested_scope = str(metadata.get("scope") or "personal")
             if requested_scope not in {"personal", "global"}:
                 findings.append(Finding(rel, "acl", "blocking", "scope must be personal or global"))
@@ -183,12 +239,12 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
             owner = str(metadata.get("owner") or principal.subject)
             target = docs_dir / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source_file, target)
+            target.write_bytes(source_bytes)
             target.chmod(0o440)
             documents.append({
                 "path": rel,
                 "sha256": content_digest,
-                "bytes": len(text.encode()),
+                "bytes": len(source_bytes),
                 "okf_type": metadata.get("type"),
                 "scope": requested_scope,
                 "owner": owner,
@@ -275,6 +331,31 @@ def _verified_manifest(import_id: str) -> tuple[dict[str, Any], Path]:
         if hashlib.sha256(path.read_bytes()).hexdigest() != doc["sha256"]:
             raise ValueError("staging snapshot has changed since validation")
     return manifest, base
+
+
+def verify_staging_snapshots() -> dict[str, Any]:
+    """Verify every retained import against its immutable manifest and database row."""
+    init_db()
+    with connect() as db:
+        rows = db.execute(
+            """SELECT import_id, producer_version, source_digest, document_count,
+                      deleted_document_count
+               FROM openwiki_imports ORDER BY import_id"""
+        ).fetchall()
+    for row in rows:
+        manifest, _ = _verified_manifest(str(row["import_id"]))
+        documents = manifest.get("documents")
+        deleted = manifest.get("deleted_documents") or []
+        if not isinstance(documents, list) or not isinstance(deleted, list):
+            raise ValueError("staging manifest document lists are invalid")
+        if (
+            manifest.get("producer_version") != row["producer_version"]
+            or manifest.get("source_digest") != row["source_digest"]
+            or len(documents) != int(row["document_count"])
+            or len(deleted) != int(row["deleted_document_count"])
+        ):
+            raise ValueError("staging manifest does not match its import record")
+    return {"valid": True, "verified": len(rows)}
 
 
 def purge_staging_reference(import_id: str, source_id: str) -> bool:

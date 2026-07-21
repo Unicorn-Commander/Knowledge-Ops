@@ -1,7 +1,7 @@
 # Governed Memory Lifecycle
 
-Knowledge-Ops 0.3 adds upgrade-safe temporal validity, deletion propagation,
-quality review queues, refresh run contracts, and a deterministic offline
+Knowledge-Ops 0.4 provides upgrade-safe temporal validity, convergent deletion,
+quality review queues, durable refresh execution, and a deterministic offline
 evaluation. SQLite remains canonical. OpenWiki remains an untrusted staged
 producer and cannot write directly to canonical memory.
 
@@ -52,8 +52,15 @@ crash between canonical deletion and projection cleanup. Startup also rechecks
 successful receipts so a filesystem rollback or stale reindex cannot resurrect
 content. Disk seeding does not resurrect known tombstones, and later OpenWiki
 bundles cannot stage a document at a tombstoned canonical path.
-External federated stores remain owned by their source applications; their own
-deletion must be completed there before the next connector refresh.
+External federated stores remain owned by their source applications. A
+credential-free outbox records one idempotent task per configured source-owner
+adapter. The durable worker processes only explicitly registered adapters with
+process-owned credentials. Exhausted tasks stay failed for operator review;
+after the source-side condition is corrected, a knowledge administrator can
+redrive a failed task from Operations or
+`POST /kb.deletion_outbox/{task_id}/redrive`. Local projection reconciliation
+normally scans pending receipts only; startup and restore verification also
+recheck completed receipts to prevent rollback-based resurrection.
 
 ## Review Queue
 
@@ -70,21 +77,32 @@ with a note. Findings that disappear are auto-resolved by the next scan.
 ## Refresh Contracts
 
 Refresh jobs contain only a job id, kind, source reference, interval, and enabled
-state. Credential material is not accepted. Run records have a stable run id and
-a unique `(job_id, idempotency_key)` contract, so repeated dispatch is safe.
+state. Credential material and connector endpoints are not accepted. Each run
+snapshots its kind and logical source in the same transaction that enqueues it,
+so later job edits affect only future runs. Run records have a stable run id and unique
+`(job_id, idempotency_key)` contract, so repeated scheduling is safe.
 
-- `review_scan` runs locally and completes synchronously.
-- `connector_refresh` creates a pending contract for an external worker, which
-  completes it through `/kb.refresh_complete`.
-- `POST /kb.refresh_due` or `knowledge-ops refresh-due` dispatches due work. The
-service intentionally does not run a hidden background scheduler.
+The `knowledge-ops worker` process is the scheduler and executor. Each poll
+enqueues due jobs and claims bounded batches with expiring leases, heartbeat
+renewal, and fencing tokens. Claims serialize both job id and source reference,
+so two job definitions cannot refresh the same source concurrently. A crash or
+graceful shutdown makes work reclaimable without allowing an old owner to
+commit. Exponential retry is capped by configured delay and attempt ceilings;
+lease crashes also consume the ceiling and become terminal when exhausted.
 
-Synchronous scan failures are recorded as failed runs before the error is
-returned. Duplicate `(job_id, idempotency_key)` dispatches return the original
-run, including under concurrent insert races.
+- `review_scan` invokes the built-in deterministic review scanner.
+- `connector_refresh` runs only when the worker process has an explicitly
+  registered idempotent adapter for its logical source reference.
+- `POST /kb.refresh_due`, `POST /kb.refresh_run`, and their CLI equivalents are
+  administrative enqueue controls. The worker also schedules due work itself.
+- `/kb.refresh_complete` is retained as an authenticated administrative
+  compatibility operation; normal production completion uses the worker's
+  fenced lease path.
 
-Production still requires an operator-managed scheduler, connector workers and
-their secret-store wiring, retry/alert policy, and named review ownership.
+Duplicate enqueue requests return the original run, including under concurrent
+insert races. Production still requires source-owner adapter implementations,
+external secret-store wiring, alert routing, and named review ownership, but it
+does not require a separate cron scheduler.
 
 ## Citation Inspection
 
@@ -113,7 +131,13 @@ database and never read or modify production memory.
 
 ## Upgrade and Rollout
 
-`init_db()` records schema migration version 1 and adds missing columns/tables in
-place. It never drops or resets existing tables. Before rollout, take a database
-backup, start one upgraded instance to apply the migration, run the test and
-evaluation gates, then configure the external scheduler and connector workers.
+`init_db()` records schema migration version 3 and adds missing columns/tables in
+place under a lock beside the configured database. It never drops or resets
+existing tables. Before rollout, take a database backup, start one upgraded
+instance to apply the migration, run the test and evaluation gates, then start
+the API and worker topology and confirm worker-backed readiness.
+
+Version 3 also migrates native personal wiki and file-index rows from a verified
+legacy OIDC email owner to the token's stable `sub` on the first authenticated
+request. The migration is transactional and its receipt stores only an email
+digest. Unverified email and mutable username claims never trigger it.

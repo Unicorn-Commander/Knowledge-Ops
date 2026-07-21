@@ -1,4 +1,4 @@
-# Knowledge-Ops v0.3
+# Knowledge-Ops v0.4
 
 Knowledge-Ops is the Magic Unicorn governed evidence and memory layer. Agents call `kb.search` or `kb.ground`; the service decides which stores to query, merges authorized evidence, and returns cited passages with explicitly heuristic relationship labels.
 
@@ -56,6 +56,8 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | Method | Path | Notes |
 |---|---|---|
 | GET  | `/health` | Liveness — `{"ok": true}` |
+| GET  | `/ready` | Readiness — storage, staging, and required worker heartbeat |
+| GET  | `/metrics` | Authenticated low-cardinality OpenMetrics |
 | GET  | `/` | Redirects to the web GUI at `/ui/` |
 | GET  | `/ui/` | **Web GUI** (Ask/Ground, Wiki, Files, Metrics, Sources) |
 | GET  | `/info` | Service info JSON |
@@ -80,6 +82,7 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | GET  | `/kb.deep_read?path=...&query=...` | all chunks of one file |
 | GET/POST | `/kb.review_items`, `/kb.review_scan`, `/kb.review_resolve` | administrator memory-quality queue |
 | GET/POST | `/kb.refresh_jobs`, `/kb.refresh_job`, `/kb.refresh_run`, `/kb.refresh_due`, `/kb.refresh_complete` | administrator refresh contracts |
+| GET/POST | `/kb.deletion_outbox`, `/kb.deletion_outbox/{task_id}/redrive` | administrator source-owner deletion operations |
 
 Verified grounded call (returns evidence + citations):
 
@@ -228,12 +231,14 @@ missing authorization contract keeps the adapter disabled.
 ## Authorization and visibility
 
 REST and HTTP-MCP share one verified-principal policy. Omitting scope returns
-global knowledge plus personal records owned by token `sub`/identity aliases.
+global knowledge plus personal records owned by token `sub`/verified identity aliases.
 `scope=personal` cannot retrieve another owner. `scope=all`, restricted sources,
 global writes, file indexing, and OpenWiki promotion require administrator or
 specific elevated scopes. Missing source classification is `restricted`.
+For OIDC, `sub` is authoritative; email is an alias only when the signed token
+sets boolean `email_verified: true`, and `preferred_username` is not an owner.
 
-OpenWiki 0.1.0 is pinned as an untrusted producer. Its immutable staging,
+OpenWiki 0.2.0 is pinned as an untrusted producer. Its immutable staging,
 OKF/security gates, and review-before-canonical contract are in
 `docs/OPENWIKI-GOVERNANCE.md`.
 

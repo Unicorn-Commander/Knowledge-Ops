@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import federation
+from . import __version__, federation
 from .authorization import (
     AuthorizationError,
     Principal,
@@ -32,6 +32,7 @@ from .authorization import (
 from .citations import inspect_citation
 from .file_index import deep_read, find_file
 from .metrics import record_metric
+from .operations import sanitize_error
 from .storage import record_audit
 from .wiki import get_doc, history, list_docs, tombstone_doc, upsert_doc
 
@@ -183,17 +184,27 @@ async def _call_tool(name: str, arguments: dict, principal: Principal) -> dict:
     bare = (name or "").split(".")[-1]  # tolerate a `knowledge.` namespace prefix
     handler = _HANDLERS.get(bare)
     if handler is None:
-        return _tool_content({"error": f"unknown tool: {name}"}, is_error=True)
+        return _tool_content({"error": "unknown tool"}, is_error=True)
     try:
         result = handler(arguments or {}, principal)
         if inspect.isawaitable(result):
             result = await result
         return _tool_content(result)
-    except KeyError as exc:
-        return _tool_content({"error": f"missing required argument: {exc}"}, is_error=True)
+    except KeyError:
+        return _tool_content({"error": "missing required argument"}, is_error=True)
     except Exception as exc:  # never 500 the broker; surface as an MCP tool error
-        logger.exception("tools/call %s failed", name)
-        return _tool_content({"error": f"{type(exc).__name__}: {exc}"}, is_error=True)
+        receipt = sanitize_error(
+            exc, category="mcp_tool_failed", exception_type=type(exc).__name__
+        )
+        logger.error("tools/call failed tool=%s code=%s", bare, receipt)
+        return _tool_content({"error": receipt}, is_error=True)
+
+
+def _audit_tool_name(name: object) -> str:
+    if not isinstance(name, str):
+        return "unknown"
+    bare = name.split(".")[-1]
+    return bare if bare in _HANDLERS else "unknown"
 
 
 def _required_scopes(name: str) -> list[str]:
@@ -219,7 +230,7 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
         return 200, _rpc_result(req_id, {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "knowledge-ops", "version": "0.3.0"},
+            "serverInfo": {"name": "knowledge-ops", "version": __version__},
         })
     if method in ("notifications/initialized", "notifications/cancelled"):
         return 202, None
@@ -228,19 +239,30 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
     if method == "tools/list":
         return 200, _rpc_result(req_id, {"tools": list_tools()})
     if method == "tools/call":
+        if not isinstance(params, dict):
+            return 400, _rpc_error(req_id, -32602, "invalid params")
+        raw_name = params.get("name", "")
+        name = raw_name if isinstance(raw_name, str) else ""
+        audit_name = _audit_tool_name(raw_name)
         try:
             principal = require_tool_principal(authorization)
-        except AuthorizationError as exc:
-            return 401, _rpc_error(req_id, -32001, f"unauthorized: {exc}")
-        name = params.get("name", "")
+        except AuthorizationError:
+            record_audit("anonymous", "auth.mcp.authentication", "tools/call", "denied")
+            return 401, _rpc_error(req_id, -32001, "unauthorized")
         try:
             principal.require(*_required_scopes(name))
-        except AuthorizationError as exc:
-            record_audit(principal.subject, "mcp.tool", name, "denied", {"reason": str(exc)})
-            return 403, _rpc_error(req_id, -32003, f"forbidden: {exc}")
+        except AuthorizationError:
+            record_audit(
+                principal.subject, "mcp.tool", audit_name, "denied",
+                {"reason_code": "permission_denied"},
+            )
+            return 403, _rpc_error(req_id, -32003, "forbidden")
         arguments = params.get("arguments") or {}
         result = await _call_tool(name, arguments, principal)
-        record_audit(principal.subject, "mcp.tool", name, "success" if not result.get("isError") else "error")
+        record_audit(
+            principal.subject, "mcp.tool", audit_name,
+            "success" if not result.get("isError") else "error",
+        )
         return 200, _rpc_result(req_id, result)
 
     return 200, _rpc_error(req_id, -32601, f"method not found: {method}")

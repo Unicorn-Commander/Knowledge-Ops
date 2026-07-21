@@ -5,9 +5,14 @@
 services:
   knowledge-ops:
     build: .
-    image: knowledge-ops:0.3.0
+    image: knowledge-ops:0.4.0
     container_name: knowledge-ops
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
@@ -27,9 +32,46 @@ services:
       KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
       KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
       KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
+      # API readiness reports worker state, but standalone API-only development
+      # does not require the optional worker profile.
+      KNOWLEDGE_OPS_REQUIRE_WORKER: "${KNOWLEDGE_OPS_REQUIRE_WORKER:-0}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/ready', timeout=5).read()"]
       interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  knowledge-ops-worker:
+    profiles: ["worker"]
+    build: .
+    image: knowledge-ops:0.4.0
+    container_name: knowledge-ops-worker
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    command: ["knowledge-ops", "worker"]
+    volumes:
+      - knowledge_ops_data:/data
+      - knowledge_ops_wiki:/wiki
+    environment:
+      KNOWLEDGE_OPS_DATA: /data
+      KNOWLEDGE_OPS_DB: /data/knowledge_ops.sqlite3
+      KNOWLEDGE_OPS_WIKI: /wiki
+      KNOWLEDGE_OPS_OPENWIKI_STAGING: /data/openwiki/staging
+      KNOWLEDGE_OPS_WORKER_ID: knowledge-ops-worker
+      KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
+      KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
+      KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
+      # No live adapter is imported or activated by the base image. Source
+      # deletion targets are logical names only and default to an empty map.
+      KNOWLEDGE_OPS_DELETION_TARGETS: "{}"
+    healthcheck:
+      test: ["CMD", "knowledge-ops", "worker-health"]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s

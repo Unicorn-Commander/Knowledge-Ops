@@ -48,7 +48,7 @@ def test_legacy_database_upgrades_in_place(tmp_path, monkeypatch):
         version = db.execute("SELECT max(version) FROM schema_migrations").fetchone()[0]
     assert {"valid_from", "valid_until", "supersedes_id", "lifecycle_state", "tombstoned_at"} <= columns
     assert row["valid_from"] == "2025-01-01T00:00:00+00:00" and row["body"] == "body"
-    assert row["lifecycle_state"] == "active" and version == 1
+    assert row["lifecycle_state"] == "active" and version == 3
 
 
 def test_supersession_supports_current_and_as_of_retrieval(tmp_path, monkeypatch):
@@ -94,7 +94,7 @@ def test_tombstone_purges_every_local_and_openwiki_projection(tmp_path, monkeypa
     )
     monkeypatch.setattr(config.settings, "openwiki_import_roots", [source])
     admin = system_principal()
-    staged = stage_bundle(str(source), "0.1.0", admin)
+    staged = stage_bundle(str(source), "0.2.0", admin)
     first_import_id = staged["import_id"]
     promoted = approve_import(staged["import_id"], admin, "Reviewed")
     doc_id = promoted["promoted_doc_ids"][0]
@@ -105,7 +105,7 @@ def test_tombstone_purges_every_local_and_openwiki_projection(tmp_path, monkeypa
     )
     # Restore governed provenance through a second reviewed snapshot.
     (source / "project.md").write_text((source / "project.md").read_text() + "\nRevision.\n")
-    staged = stage_bundle(str(source), "0.1.0", admin)
+    staged = stage_bundle(str(source), "0.2.0", admin)
     second_import_id = staged["import_id"]
     approve_import(staged["import_id"], admin, "Reviewed update")
 
@@ -130,7 +130,7 @@ def test_tombstone_purges_every_local_and_openwiki_projection(tmp_path, monkeypa
         "---\ntype: knowledge\nsource_uri: connector://project/1\nscope: global\n---\n"
         "# Project\n\nA producer attempted to restore DELETE-ME-9922.\n"
     )
-    blocked = stage_bundle(str(source), "0.1.0", admin)
+    blocked = stage_bundle(str(source), "0.2.0", admin)
     assert blocked["state"] == "blocked" and blocked["documents"] == []
     assert any(item["category"] == "deletion" for item in blocked["findings"])
     assert not (
@@ -158,7 +158,7 @@ def test_tombstone_projection_cleanup_retries_after_interruption(tmp_path, monke
     )
     monkeypatch.setattr(config.settings, "openwiki_import_roots", [source])
     admin = system_principal()
-    staged = stage_bundle(str(source), "0.1.0", admin)
+    staged = stage_bundle(str(source), "0.2.0", admin)
     doc_id = approve_import(staged["import_id"], admin, "Reviewed")["promoted_doc_ids"][0]
 
     real_purge = pipeline.purge_staging_references
@@ -191,7 +191,10 @@ def test_tombstone_projection_cleanup_retries_after_interruption(tmp_path, monke
     projection.write_text("# Restored projection\n\nCLEANUP-8821\n")
     monkeypatch.setattr(config.settings, "default_file_roots", [config.settings.wiki_dir])
     assert index_root(config.settings.wiki_dir, scope="global", owner="org") > 0
-    assert reconcile_pending_deletions() == {"completed": 1, "pending": 0}
+    assert reconcile_pending_deletions(include_completed=True) == {
+        "completed": 1,
+        "pending": 0,
+    }
     assert not projection.exists()
     with connect() as db:
         assert db.execute(
@@ -334,7 +337,9 @@ def test_failed_synchronous_refresh_is_durably_recorded(tmp_path, monkeypatch):
             scheduled_for="2026-01-01T00:00:00Z",
         )
     run = quality.list_refresh_runs()[0]
-    assert run["status"] == "failed" and "RuntimeError" in run["error"]
+    assert run["status"] == "failed"
+    assert run["error"].startswith("operation_failed:")
+    assert "scanner failure" not in run["error"]
 
 
 def test_citation_span_is_exact_and_authorized(tmp_path, monkeypatch):

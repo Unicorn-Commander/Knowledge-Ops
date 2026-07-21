@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import federation, mcp_http
+from . import __version__, federation, mcp_http
 from .authorization import (
     AuthorizationError,
     Principal,
@@ -25,7 +25,7 @@ from .config import settings
 from .citations import inspect_citation
 from .file_index import deep_read, find_file, index_root
 from .http_middleware import RequestGuardMiddleware
-from .metrics import metric_rows, record_metric, render_metric_chart
+from .metrics import metric_rows, prometheus_metrics, record_metric, render_metric_chart
 from .memory_quality import (
     complete_refresh_run,
     list_refresh_jobs,
@@ -38,7 +38,21 @@ from .memory_quality import (
     upsert_refresh_job,
 )
 from .openwiki_pipeline import approve_import, get_import, list_imports, reject_import, stage_bundle
-from .storage import audit_rows, connect, init_db, record_audit
+from .operations import (
+    list_deletion_tasks,
+    operations_snapshot,
+    redrive_deletion_task,
+    sanitize_error,
+    worker_readiness,
+)
+from .storage import (
+    SCHEMA_VERSION,
+    audit_rows,
+    connect,
+    init_db,
+    migrate_verified_email_ownership,
+    record_audit,
+)
 from .wiki import (
     get_doc,
     history,
@@ -70,15 +84,18 @@ async def lifespan(app: FastAPI):
         repaired = sync_wiki_to_disk()
         if repaired:
             logger.warning("repaired %d wiki markdown projections from canonical storage", repaired)
-        deletions = reconcile_pending_deletions()
+        deletions = reconcile_pending_deletions(include_completed=True)
         if deletions["pending"]:
             logger.error("%d deletion receipts still have pending projections", deletions["pending"])
-    except Exception:  # never let seeding crash startup
-        logger.exception("wiki seed-on-startup failed (non-fatal)")
+    except Exception as exc:  # never let seeding crash startup
+        logger.error(
+            "wiki seed-on-startup failed code=%s",
+            sanitize_error(exc, category="startup_reconciliation_failed"),
+        )
     yield
 
 
-app = FastAPI(title="Knowledge-Ops", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Knowledge-Ops", version=__version__, lifespan=lifespan)
 app.add_middleware(
     RequestGuardMiddleware,
     max_bytes=settings.max_request_bytes,
@@ -93,6 +110,16 @@ async def _on_validation_error(request: Request, exc: RequestValidationError) ->
 
 @app.exception_handler(AuthorizationError)
 async def _on_forbidden(request: Request, exc: AuthorizationError) -> JSONResponse:
+    try:
+        record_audit(
+            "authenticated", "auth.api.authorization", request.url.path, "denied",
+            {"reason_code": "permission_denied"},
+        )
+    except Exception as audit_exc:
+        logger.error(
+            "authorization audit persistence failed code=%s",
+            sanitize_error(audit_exc, category="audit_persistence_failed"),
+        )
     return JSONResponse({"error": {"type": "forbidden", "message": str(exc)}}, status_code=403)
 
 
@@ -103,17 +130,39 @@ async def _on_bad_request(request: Request, exc: ValueError) -> JSONResponse:
 
 @app.exception_handler(Exception)
 async def _on_unhandled(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("unhandled error on %s %s", request.method, request.url.path)
+    logger.error(
+        "request failed code=%s",
+        sanitize_error(exc, category="request_failed", exception_type=type(exc).__name__),
+    )
     return JSONResponse({"error": {"type": "internal_error", "message": "request could not be completed"}}, status_code=500)
 
 
 def current_principal(request: Request) -> Principal:
     try:
-        return principal_from_authorization(
+        principal = principal_from_authorization(
             request.headers.get("authorization"),
             require_auth=settings.api_require_auth,
         )
+        if settings.api_require_auth and principal.issuer in settings.api_trusted_issuers:
+            for identity in sorted(principal.identities - {principal.subject.casefold()}):
+                if "@" in identity:
+                    migrate_verified_email_ownership(
+                        issuer=principal.issuer,
+                        subject=principal.subject,
+                        verified_email=identity,
+                    )
+        return principal
     except AuthorizationError as exc:
+        try:
+            record_audit(
+                "anonymous", "auth.api.authentication", request.url.path, "denied",
+                {"reason_code": "authorization_failed"},
+            )
+        except Exception as audit_exc:
+            logger.error(
+                "authentication audit persistence failed code=%s",
+                sanitize_error(audit_exc, category="audit_persistence_failed"),
+            )
         raise HTTPException(status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}) from exc
 
 
@@ -130,7 +179,7 @@ def root() -> RedirectResponse:
 def info() -> dict:
     return {
         "service": "knowledge-ops",
-        "version": "0.3.0",
+        "version": __version__,
         "ui": "/ui/",
         "docs": "/docs",
         "health": "/health",
@@ -237,14 +286,40 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> JSONResponse:
-    checks = {"database": False, "wiki": settings.wiki_dir.is_dir(), "staging": settings.openwiki_staging_dir.is_dir()}
+    checks = {
+        "database": False,
+        "schema": False,
+        "wiki": settings.wiki_dir.is_dir(),
+        "staging": settings.openwiki_staging_dir.is_dir(),
+    }
+    worker = worker_readiness()
     try:
         with connect() as db:
             checks["database"] = db.execute("SELECT 1").fetchone()[0] == 1
-    except Exception:
-        logger.exception("readiness database check failed")
+            checks["schema"] = int(db.execute(
+                "SELECT coalesce(max(version), 0) FROM schema_migrations"
+            ).fetchone()[0]) == SCHEMA_VERSION
+    except Exception as exc:
+        logger.error(
+            "readiness database check failed code=%s",
+            sanitize_error(exc, category="readiness_database_failed"),
+        )
+    checks["worker"] = worker["ready"] if worker["required"] else True
     ok = all(checks.values())
-    return JSONResponse({"ok": ok, "service": "knowledge-ops", "checks": checks}, status_code=200 if ok else 503)
+    return JSONResponse(
+        {"ok": ok, "service": "knowledge-ops", "checks": checks, "worker": worker},
+        status_code=200 if ok else 503,
+    )
+
+
+@app.get("/metrics")
+def openmetrics(principal: ApiPrincipal) -> Response:
+    if not principal.is_admin:
+        raise AuthorizationError("operational metrics require knowledge-admin")
+    return Response(
+        prometheus_metrics(),
+        media_type="application/openmetrics-text; version=1.0.0; charset=utf-8",
+    )
 
 
 @app.post("/kb.search")
@@ -393,6 +468,33 @@ def kb_refresh_jobs(principal: ApiPrincipal) -> dict:
     if not principal.is_admin:
         raise AuthorizationError("refresh operations require knowledge-admin")
     return {"jobs": list_refresh_jobs(), "runs": list_refresh_runs(limit=100)}
+
+
+@app.get("/kb.operations")
+def kb_operations(principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("operational state requires knowledge-admin")
+    return operations_snapshot()
+
+
+@app.get("/kb.deletion_outbox")
+def kb_deletion_outbox(
+    principal: ApiPrincipal,
+    status: Literal["all", "pending", "running", "failed", "succeeded"] = "all",
+    limit: int = 200,
+) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("deletion outbox requires knowledge-admin")
+    return {"tasks": list_deletion_tasks(status=status, limit=limit)}
+
+
+@app.post("/kb.deletion_outbox/{task_id}/redrive")
+def kb_deletion_outbox_redrive(task_id: str, principal: ApiPrincipal) -> dict:
+    if not principal.is_admin:
+        raise AuthorizationError("deletion outbox redrive requires knowledge-admin")
+    task = redrive_deletion_task(task_id)
+    record_audit(principal.subject, "deletion.outbox_redrive", task_id, "success")
+    return {"task": task}
 
 
 @app.post("/kb.refresh_job")

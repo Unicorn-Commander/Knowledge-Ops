@@ -5,6 +5,8 @@ import json
 import re
 from typing import Any
 
+from .config import settings
+from .operations import sanitize_error, sanitize_receipt
 from .storage import connect, init_db, json_dumps, now
 from .text import stable_id
 from .wiki import normalize_timestamp
@@ -22,7 +24,9 @@ def _review_row(row: Any) -> dict[str, Any]:
 
 def _refresh_row(row: Any) -> dict[str, Any]:
     item = dict(row)
-    item["enabled"] = bool(item.get("enabled", 0))
+    item.pop("lease_token", None)
+    if "enabled" in item:
+        item["enabled"] = bool(item["enabled"])
     if "result_json" in item:
         item["result"] = json.loads(item.pop("result_json", "{}"))
     return item
@@ -187,7 +191,11 @@ def upsert_refresh_job(
     if kind not in REFRESH_KINDS:
         raise ValueError("unsupported refresh job kind")
     source_ref = source_ref.strip() or "wiki"
-    if len(source_ref) > 200 or not re.fullmatch(r"[A-Za-z0-9._:/-]+", source_ref):
+    if (
+        len(source_ref) > 200
+        or not re.fullmatch(r"[A-Za-z0-9._:/-]+", source_ref)
+        or "://" in source_ref
+    ):
         raise ValueError("source_ref must be a credential-free logical source identifier")
     if kind == "review_scan" and source_ref not in {"", "wiki"}:
         raise ValueError("review_scan source_ref must be wiki")
@@ -195,6 +203,7 @@ def upsert_refresh_job(
         raise ValueError("refresh interval must be between 60 seconds and one year")
     timestamp = now()
     with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         db.execute(
             """INSERT INTO refresh_jobs(
                  job_id, kind, source_ref, interval_seconds, enabled, created_at, updated_at
@@ -238,23 +247,43 @@ def run_refresh_job(
         raise ValueError("idempotency key is required and must be at most 200 characters")
     schedule = normalize_timestamp(scheduled_for, default=now())
     with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
         job = db.execute("SELECT * FROM refresh_jobs WHERE job_id=?", (job_id,)).fetchone()
         if not job:
             raise ValueError("refresh job was not found")
         run_id = "rr-" + stable_id(f"{job_id}:{idempotency_key}")[:24]
+        existing = db.execute(
+            "SELECT * FROM refresh_runs WHERE job_id=? AND idempotency_key=?",
+            (job_id, idempotency_key),
+        ).fetchone()
+        if existing:
+            return _refresh_row(existing)
+        if job["kind"] == "review_scan":
+            overlapping = db.execute(
+                """SELECT 1 FROM refresh_runs
+                   WHERE status='running'
+                     AND (job_id=? OR source_ref_snapshot=?)
+                   LIMIT 1""",
+                (job_id, str(job["source_ref"])),
+            ).fetchone()
+            if overlapping:
+                raise ValueError("an overlapping refresh run is already active")
         initial_status = "running" if job["kind"] == "review_scan" else "pending"
+        attempt_count = 1 if job["kind"] == "review_scan" else 0
         inserted = db.execute(
             """INSERT OR IGNORE INTO refresh_runs(
-                 run_id, job_id, idempotency_key, status, scheduled_for, started_at, actor
-               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (run_id, job_id, idempotency_key, initial_status, schedule, now(), actor[:200]),
+                 run_id, job_id, idempotency_key, status, scheduled_for, started_at, actor,
+                 attempt_count, max_attempts, next_attempt_at,
+                 kind_snapshot, source_ref_snapshot
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id, job_id, idempotency_key, initial_status, schedule, now(),
+                actor[:200], attempt_count, settings.worker_max_attempts, schedule,
+                str(job["kind"]), str(job["source_ref"]),
+            ),
         )
         if inserted.rowcount != 1:
-            existing = db.execute(
-                "SELECT * FROM refresh_runs WHERE job_id=? AND idempotency_key=?",
-                (job_id, idempotency_key),
-            ).fetchone()
-            return _refresh_row(existing)
+            raise RuntimeError("refresh run enqueue lost its serialized insert")
     if job["kind"] == "review_scan":
         try:
             result = scan_review_queue(at=schedule)
@@ -263,7 +292,7 @@ def run_refresh_job(
                 db.execute(
                     """UPDATE refresh_runs SET status='failed', completed_at=?, error=?
                        WHERE run_id=?""",
-                    (now(), f"{type(exc).__name__}: {exc}"[:2000], run_id),
+                    (now(), sanitize_error(f"{type(exc).__name__}: {exc}"), run_id),
                 )
             raise
         else:
@@ -271,7 +300,7 @@ def run_refresh_job(
                 db.execute(
                     """UPDATE refresh_runs SET status='completed', completed_at=?, result_json=?
                        WHERE run_id=?""",
-                    (now(), json_dumps(result), run_id),
+                    (now(), json_dumps(sanitize_receipt(result)), run_id),
                 )
     with connect() as db:
         row = db.execute("SELECT * FROM refresh_runs WHERE run_id=?", (run_id,)).fetchone()
@@ -292,13 +321,54 @@ def complete_refresh_run(
     init_db()
     with connect() as db:
         updated = db.execute(
-            """UPDATE refresh_runs SET status=?, completed_at=?, result_json=?, error=?
+            """UPDATE refresh_runs SET status=?, completed_at=?, result_json=?, error=?,
+                 lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, heartbeat_at=NULL
                WHERE run_id=? AND status IN ('pending', 'running')""",
-            (status, now(), json_dumps(result or {}), (error or "")[:2000] or None, run_id),
+            (
+                status, now(), json_dumps(sanitize_receipt(result or {})),
+                sanitize_error(error) if error else None, run_id,
+            ),
         )
         if updated.rowcount != 1:
             raise ValueError("pending refresh run was not found")
         row = db.execute("SELECT * FROM refresh_runs WHERE run_id=?", (run_id,)).fetchone()
+    return _refresh_row(row)
+
+
+def enqueue_refresh_run(
+    job_id: str,
+    *,
+    actor: str,
+    idempotency_key: str,
+    scheduled_for: str | None = None,
+) -> dict[str, Any]:
+    """Durably enqueue a run without executing it in the caller process."""
+    init_db()
+    idempotency_key = idempotency_key.strip()
+    if not idempotency_key or len(idempotency_key) > 200:
+        raise ValueError("idempotency key is required and must be at most 200 characters")
+    schedule = normalize_timestamp(scheduled_for, default=now())
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        job = db.execute("SELECT * FROM refresh_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if not job:
+            raise ValueError("refresh job was not found")
+        run_id = "rr-" + stable_id(f"{job_id}:{idempotency_key}")[:24]
+        db.execute(
+            """INSERT OR IGNORE INTO refresh_runs(
+                 run_id, job_id, idempotency_key, status, scheduled_for, started_at, actor,
+                 attempt_count, max_attempts, next_attempt_at,
+                 kind_snapshot, source_ref_snapshot
+               ) VALUES (?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?, ?, ?)""",
+            (
+                run_id, job_id, idempotency_key, schedule, now(), actor[:200],
+                settings.worker_max_attempts, schedule, str(job["kind"]), str(job["source_ref"]),
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM refresh_runs WHERE job_id=? AND idempotency_key=?",
+            (job_id, idempotency_key),
+        ).fetchone()
     return _refresh_row(row)
 
 
@@ -325,6 +395,38 @@ def run_due_refresh_jobs(*, actor: str, at: str | None = None) -> list[dict[str,
             )
         scheduled = due_at.astimezone(timezone.utc).isoformat()
         results.append(run_refresh_job(
+            job["job_id"], actor=actor,
+            idempotency_key=f"scheduled:{scheduled}", scheduled_for=scheduled,
+        ))
+    return results
+
+
+def enqueue_due_refresh_jobs(*, actor: str, at: str | None = None) -> list[dict[str, Any]]:
+    """Schedule every due job for durable worker execution."""
+    timestamp = normalize_timestamp(at, default=now())
+    moment = datetime.fromisoformat(timestamp)
+    results: list[dict[str, Any]] = []
+    for job in list_refresh_jobs():
+        if not job["enabled"]:
+            continue
+        with connect() as db:
+            last = db.execute(
+                "SELECT scheduled_for FROM refresh_runs WHERE job_id=? ORDER BY scheduled_for DESC LIMIT 1",
+                (job["job_id"],),
+            ).fetchone()
+        if last:
+            due_at = datetime.fromisoformat(last["scheduled_for"]) + timedelta(
+                seconds=job["interval_seconds"]
+            )
+            if due_at > moment:
+                continue
+        else:
+            seconds = int(moment.timestamp())
+            due_at = datetime.fromtimestamp(
+                seconds - (seconds % job["interval_seconds"]), tz=timezone.utc
+            )
+        scheduled = due_at.astimezone(timezone.utc).isoformat()
+        results.append(enqueue_refresh_run(
             job["job_id"], actor=actor,
             idempotency_key=f"scheduled:{scheduled}", scheduled_for=scheduled,
         ))

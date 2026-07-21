@@ -45,6 +45,13 @@ jobs:
           python -m compileall -q knowledge_ops tests
           node --check knowledge_ops/static/app.js
           docker compose config --quiet
+          docker compose --profile worker config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.bigboy.yml \
+            --profile worker config --quiet
+          test -x scripts/backup.sh
+          test -x scripts/restore_verify.sh
+          test -x scripts/verify_container_operations.sh
+          sh -n scripts/backup.sh scripts/restore_verify.sh scripts/verify_container_operations.sh
 
       - name: Audit locked runtime dependencies
         run: |
@@ -56,8 +63,23 @@ jobs:
           docker build --tag knowledge-ops:ci .
           docker run --rm knowledge-ops:ci python -m pip check
           docker run --rm knowledge-ops:ci python -m knowledge_ops.cli evaluate-memory
+          docker tag knowledge-ops:ci knowledge-ops:0.4.0
+          scripts/verify_container_operations.sh knowledge-ops:0.4.0
           docker save --output /tmp/knowledge-ops-ci.tar knowledge-ops:ci
+          docker run --rm --volume /tmp:/scan \
+            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
+            image --input /scan/knowledge-ops-ci.tar --format cyclonedx \
+            --output /scan/knowledge-ops.cdx.json --no-progress
+          python -c 'import json; value=json.load(open("/tmp/knowledge-ops.cdx.json")); assert value["bomFormat"] == "CycloneDX" and value["components"]'
           docker run --rm --volume /tmp:/scan:ro \
             aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
             image --input /scan/knowledge-ops-ci.tar --scanners vuln \
             --severity HIGH,CRITICAL --exit-code 1 --no-progress
+
+      - name: Upload production image SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: knowledge-ops-cyclonedx-sbom
+          path: /tmp/knowledge-ops.cdx.json
+          if-no-files-found: error
+          retention-days: 30

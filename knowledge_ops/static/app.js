@@ -534,6 +534,34 @@ async function loadRefreshOperations() {
   }
 }
 
+async function loadOperationalState() {
+  const workerBox = $("#workerState"), outboxBox = $("#deletionOutbox");
+  workerBox.innerHTML = outboxBox.innerHTML = `<div class="loading"><span class="spinner"></span> loading...</div>`;
+  try {
+    const data = await api("/kb.operations");
+    const readiness = data.worker || {}, worker = readiness.worker;
+    if (worker) {
+      workerBox.innerHTML = `<div class="item"><div><div class="item__title">${esc(worker.worker_kind)}</div><div class="item__sub mono">heartbeat ${fmtTime(worker.heartbeat_at)}</div></div><div class="item__meta"><span class="pill ${readiness.ready ? 'pill--ok' : 'run--failed'}">${readiness.ready ? 'ready' : esc(worker.status)}</span><span class="pill">${esc(readiness.fresh_running_workers)} active</span></div></div>`;
+    } else {
+      workerBox.innerHTML = `<div class="empty">No worker heartbeat recorded.</div>`;
+    }
+    const tasks = data.deletion_tasks || [];
+    outboxBox.innerHTML = tasks.length ? tasks.map(task => `<div class="item"><div><div class="item__title">${esc(task.adapter)}</div><div class="item__sub mono">${esc(task.source_ref)}</div></div><div class="item__meta"><span class="pill run--${esc(task.status)}">${esc(task.status)}</span><span class="dim">${esc(task.attempt_count)}/${esc(task.max_attempts)}</span>${task.status === "failed" ? `<button type="button" class="btn btn--sm deletion-redrive" data-id="${esc(task.task_id)}">Retry</button>` : ""}</div></div>`).join("") : `<div class="empty">No source-owner deletion tasks.</div>`;
+    $$(".deletion-redrive", outboxBox).forEach(button => button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await api(`/kb.deletion_outbox/${encodeURIComponent(button.dataset.id)}/redrive`, { method: "POST" });
+        toast("Deletion task queued", "ok");
+        await loadOperationalState();
+        loadAudit();
+      } catch (e) { toast(e.message, "err"); button.disabled = false; }
+    }));
+  } catch (e) {
+    const error = `<div class="error">${esc(e.message)}</div>`;
+    workerBox.innerHTML = error; outboxBox.innerHTML = error;
+  }
+}
+
 async function saveRefreshJob() {
   const payload = {
     job_id: $("#refreshJobId").value.trim(),
@@ -564,6 +592,7 @@ async function runDueRefresh() {
 
 function loadOperations() {
   loadRefreshOperations();
+  loadOperationalState();
   loadAudit();
 }
 
@@ -593,12 +622,12 @@ async function loadSources() {
 /* ---------- status pulse ---------- */
 async function pulse() {
   try {
-    const h = await api("/ready");
+    await api("/ready");
     $("#statusDot").className = "dot dot--ok";
-    $("#statusText").textContent = (h && h.service) || "online";
+    $("#statusText").textContent = "Ready";
   } catch {
     $("#statusDot").className = "dot dot--bad";
-    $("#statusText").textContent = "offline";
+    $("#statusText").textContent = "Offline";
   }
 }
 

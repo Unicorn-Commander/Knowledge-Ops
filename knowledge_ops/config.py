@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 from pathlib import Path
+import socket
 from pydantic import BaseModel, Field
 
 
@@ -37,9 +38,31 @@ class Settings(BaseModel):
         s.strip() for s in os.getenv("KNOWLEDGE_OPS_API_DEFAULT_OIDC_SCOPES", "read:knowledge").split(",") if s.strip()
     ])
     api_jwks_ttl: int = int(os.getenv("KNOWLEDGE_OPS_API_JWKS_TTL", "3600"))
+    api_jwks_max_stale_seconds: int = int(os.getenv(
+        "KNOWLEDGE_OPS_API_JWKS_MAX_STALE_SECONDS", "300"
+    ))
     api_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_API_JWT_LEEWAY", "60"))
     max_request_bytes: int = int(os.getenv("KNOWLEDGE_OPS_MAX_REQUEST_BYTES", "1048576"))
     rate_limit_per_minute: int = int(os.getenv("KNOWLEDGE_OPS_RATE_LIMIT_PER_MINUTE", "120"))
+
+    # The scheduler is an explicitly started, separate process. Adapter names
+    # are logical identifiers only; endpoints and credentials never enter the
+    # durable refresh or deletion queues.
+    worker_id: str = os.getenv(
+        "KNOWLEDGE_OPS_WORKER_ID", f"{socket.gethostname()}-{os.getpid()}"
+    )
+    worker_poll_seconds: float = float(os.getenv("KNOWLEDGE_OPS_WORKER_POLL_SECONDS", "5"))
+    worker_heartbeat_seconds: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_HEARTBEAT_SECONDS", "10"))
+    worker_stale_seconds: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_STALE_SECONDS", "45"))
+    worker_lease_seconds: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_LEASE_SECONDS", "60"))
+    worker_retry_base_seconds: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_RETRY_BASE_SECONDS", "30"))
+    worker_retry_max_seconds: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_RETRY_MAX_SECONDS", "3600"))
+    worker_max_attempts: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_MAX_ATTEMPTS", "5"))
+    worker_batch_size: int = int(os.getenv("KNOWLEDGE_OPS_WORKER_BATCH_SIZE", "25"))
+    require_worker: bool = os.getenv("KNOWLEDGE_OPS_REQUIRE_WORKER", "0") == "1"
+    deletion_targets: dict[str, str] = Field(default_factory=lambda: json.loads(
+        os.getenv("KNOWLEDGE_OPS_DELETION_TARGETS", "{}")
+    ))
 
     # OpenWiki is an untrusted producer. It may write only to immutable staging;
     # an authorized review action promotes validated documents to the wiki.
@@ -50,7 +73,7 @@ class Settings(BaseModel):
     openwiki_import_roots: list[Path] = Field(default_factory=lambda: [
         Path(p).expanduser() for p in os.getenv("KNOWLEDGE_OPS_OPENWIKI_IMPORT_ROOTS", "").split(os.pathsep) if p.strip()
     ])
-    openwiki_producer_version: str = os.getenv("KNOWLEDGE_OPS_OPENWIKI_VERSION", "0.1.0")
+    openwiki_producer_version: str = os.getenv("KNOWLEDGE_OPS_OPENWIKI_VERSION", "0.2.0")
 
     qdrant_url: str = os.getenv("KNOWLEDGE_OPS_QDRANT_URL", "http://unicorn-qdrant:6333")
     qdrant_collections: list[str] = Field(default_factory=lambda: [
@@ -88,12 +111,15 @@ class Settings(BaseModel):
         ).split(",") if i.strip()
     ])
     mcp_jwks_ttl: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWKS_TTL", "3600"))
+    mcp_jwks_max_stale_seconds: int = int(os.getenv(
+        "KNOWLEDGE_OPS_MCP_JWKS_MAX_STALE_SECONDS", "300"
+    ))
     mcp_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWT_LEEWAY", "60"))
 
     def ensure_dirs(self) -> None:
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.wiki_dir.mkdir(parents=True, exist_ok=True)
-        self.openwiki_staging_dir.mkdir(parents=True, exist_ok=True)
+        for directory in (self.data_dir, self.wiki_dir, self.openwiki_staging_dir):
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            directory.chmod(0o700)
 
 
 settings = Settings()

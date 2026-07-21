@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 import httpx
 
+from . import __version__
 from .brigade_auth import AuthError, bearer_token, verify_brigade_jwt
 from .config import settings
 from .models import Passage
@@ -93,7 +94,10 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
             scopes |= {"admin:knowledge", "write:knowledge:global", "read:knowledge:restricted"}
 
     identities = {subject.lower()}
-    for key in ("email", "preferred_username"):
+    identity_keys = ("email", "preferred_username") if not oidc else ()
+    if oidc and claims.get("email_verified") is True:
+        identity_keys = ("email",)
+    for key in identity_keys:
         value = str(claims.get(key) or "").strip().lower()
         if value:
             identities.add(value)
@@ -111,12 +115,17 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
 _oidc_lock = threading.Lock()
 _oidc_keys: dict[str, dict] = {}
 _oidc_fetched_at = 0.0
+_oidc_stale_fallback_total = 0
+
+
+def oidc_stale_fallback_total() -> int:
+    return _oidc_stale_fallback_total
 
 
 def _fetch_oidc_keys() -> dict[str, dict]:
     response = httpx.get(
         settings.api_oidc_jwks_url,
-        headers={"User-Agent": "knowledge-ops/0.2", "Accept": "application/json"},
+        headers={"User-Agent": f"knowledge-ops/{__version__}", "Accept": "application/json"},
         timeout=10,
     )
     response.raise_for_status()
@@ -126,16 +135,22 @@ def _fetch_oidc_keys() -> dict[str, dict]:
 def _oidc_signing_key(kid: str):
     import jwt as pyjwt
 
-    global _oidc_keys, _oidc_fetched_at
+    global _oidc_keys, _oidc_fetched_at, _oidc_stale_fallback_total
     with _oidc_lock:
-        fresh = time.time() - _oidc_fetched_at < settings.api_jwks_ttl
+        current = time.time()
+        age = max(0.0, current - _oidc_fetched_at)
+        ttl = max(0, settings.api_jwks_ttl)
+        fresh = age < ttl
         if kid not in _oidc_keys or not fresh:
             try:
                 _oidc_keys = _fetch_oidc_keys()
                 _oidc_fetched_at = time.time()
             except Exception as exc:
-                if kid not in _oidc_keys:
+                max_age = ttl + max(0, settings.api_jwks_max_stale_seconds)
+                fallback_age = max(0.0, time.time() - _oidc_fetched_at)
+                if kid not in _oidc_keys or fallback_age > max_age:
                     raise AuthorizationError("OIDC signing keys are unavailable") from exc
+                _oidc_stale_fallback_total += 1
         key = _oidc_keys.get(kid)
     if not key:
         raise AuthorizationError("OIDC token uses an unknown signing key")
@@ -196,7 +211,7 @@ def require_tool_principal(authorization: str | None) -> Principal:
     try:
         claims = verify_brigade_jwt(token)
     except AuthError as exc:
-        raise AuthorizationError(str(exc)) from exc
+        raise AuthorizationError("invalid Brigade token") from exc
     return principal_from_claims(claims)
 
 

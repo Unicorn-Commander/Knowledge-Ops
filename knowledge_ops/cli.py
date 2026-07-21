@@ -11,7 +11,10 @@ from .file_index import deep_read, find_file, index_root
 from .evaluation import evaluate_memory
 from .memory_quality import run_due_refresh_jobs
 from .metrics import record_metric, render_metric_chart
+from .maintenance import create_backup, reindex_wiki, restore_and_verify
+from .operations import operations_snapshot, worker_readiness
 from .storage import init_db
+from .worker import run_worker
 from .wiki import get_doc, history, ingest_marketing_docs, list_docs, upsert_doc
 
 _LOCAL = system_principal()
@@ -74,6 +77,16 @@ def main() -> None:
     p = sub.add_parser("refresh-due")
     p.add_argument("--at")
     sub.add_parser("evaluate-memory")
+    p = sub.add_parser("worker")
+    p.add_argument("--once", action="store_true")
+    sub.add_parser("operations-status")
+    sub.add_parser("worker-health")
+    p = sub.add_parser("backup")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("restore-verify")
+    p.add_argument("archive")
+    p.add_argument("--target", required=True)
+    sub.add_parser("reindex-wiki")
     args = parser.parse_args()
 
     if args.cmd == "init":
@@ -119,6 +132,26 @@ def main() -> None:
         print_json(result)
         if not result["passed"]:
             raise SystemExit(1)
+    elif args.cmd == "worker":
+        result = run_worker(once=args.once)
+        if result is not None:
+            print_json(result)
+    elif args.cmd == "operations-status":
+        print_json(operations_snapshot())
+    elif args.cmd == "worker-health":
+        result = worker_readiness()
+        print_json(result)
+        if not result["ready"]:
+            raise SystemExit(1)
+    elif args.cmd == "backup":
+        print_json(create_backup(Path(args.out)))
+    elif args.cmd == "restore-verify":
+        result = restore_and_verify(Path(args.archive), Path(args.target))
+        print_json(result)
+        if not result["verification"]["passed"]:
+            raise SystemExit(1)
+    elif args.cmd == "reindex-wiki":
+        print_json(reindex_wiki())
 
 
 if __name__ == "__main__":
