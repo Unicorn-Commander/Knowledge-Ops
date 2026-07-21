@@ -576,24 +576,45 @@ def _reconcile_deletion(deletion_id: str) -> dict:
     return _deletion_result(event, projections)
 
 
-def reconcile_pending_deletions(*, include_completed: bool = False) -> dict[str, int]:
-    """Retry pending projections, optionally rechecking every retained receipt."""
+def reconcile_pending_deletions(
+    *,
+    include_completed: bool = False,
+    limit: int | None = None,
+) -> dict[str, int]:
+    """Retry a bounded batch of deletion receipts and report deferred work.
+
+    Normal worker/startup calls select only receipts with pending projections.
+    ``include_completed`` is reserved for an explicit bounded integrity scrub; it
+    must never turn a service lifecycle hook into an all-history scan.
+    """
     init_db()
+    batch_size = settings.worker_batch_size if limit is None else limit
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError("deletion reconciliation limit must be a positive integer")
+    batch_size = min(batch_size, 1000)
+    pending_predicate = """EXISTS (
+      SELECT 1 FROM json_each(deletion_events.projections_json)
+      WHERE substr(json_each.key, 1, 1) != '_'
+        AND json_each.value='pending'
+    )"""
     with connect() as db:
         if include_completed:
-            rows = db.execute(
-                "SELECT deletion_id FROM deletion_events ORDER BY deleted_at"
-            )
-        else:
+            eligible = int(db.execute("SELECT count(*) FROM deletion_events").fetchone()[0])
             rows = db.execute(
                 """SELECT deletion_id FROM deletion_events
-                   WHERE EXISTS (
-                     SELECT 1 FROM json_each(deletion_events.projections_json)
-                     WHERE substr(json_each.key, 1, 1) != '_'
-                       AND json_each.value='pending'
-                   )
-                   ORDER BY deleted_at"""
-            )
+                   ORDER BY deleted_at, deletion_id LIMIT ?""",
+                (batch_size,),
+            ).fetchall()
+        else:
+            eligible = int(db.execute(
+                f"SELECT count(*) FROM deletion_events WHERE {pending_predicate}"
+            ).fetchone()[0])
+            rows = db.execute(
+                f"""SELECT deletion_id FROM deletion_events
+                    WHERE {pending_predicate}
+                    ORDER BY deleted_at, deletion_id LIMIT ?""",
+                (batch_size,),
+            ).fetchall()
         deletion_ids = [str(row["deletion_id"]) for row in rows]
     completed = pending = 0
     for deletion_id in deletion_ids:
@@ -602,7 +623,17 @@ def reconcile_pending_deletions(*, include_completed: bool = False) -> dict[str,
             completed += 1
         else:
             pending += 1
-    return {"completed": completed, "pending": pending}
+    with connect() as db:
+        backlog = int(db.execute(
+            f"SELECT count(*) FROM deletion_events WHERE {pending_predicate}"
+        ).fetchone()[0])
+    return {
+        "processed": len(deletion_ids),
+        "completed": completed,
+        "pending": pending,
+        "remaining": max(0, eligible - len(deletion_ids)),
+        "backlog": backlog,
+    }
 
 
 def tombstone_doc(doc_id_or_path: str, *, principal: Principal, reason: str) -> dict:

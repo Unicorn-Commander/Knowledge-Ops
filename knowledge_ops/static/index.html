@@ -45,6 +45,7 @@
 
         <div class="card card--strong">
           <div class="field">
+            <label class="lbl" for="askQuery">Question</label>
             <textarea class="textarea" id="askQuery" placeholder="e.g. What is Magic Unicorn? &nbsp;/&nbsp; What is our brand voice?" style="min-height: 84px;"></textarea>
           </div>
           <div class="row" style="justify-content: space-between;">
@@ -93,7 +94,7 @@
               <h2 class="section" style="margin: 0;">Documents</h2>
               <button class="btn btn--sm" id="wikiNewBtn">+ New</button>
             </div>
-            <div class="field"><input class="input" id="wikiFilter" placeholder="Filter docs…" /></div>
+            <div class="field"><label class="lbl" for="wikiFilter">Filter documents</label><input class="input" id="wikiFilter" placeholder="Filter docs…" /></div>
             <div class="list" id="wikiList"><div class="loading"><span class="spinner"></span> loading…</div></div>
           </div>
           <div class="card card--strong" id="wikiPane">
@@ -137,14 +138,14 @@
 
         <div class="card card--strong">
           <div class="row">
-            <input class="input" id="fileQuery" placeholder="Search files… e.g. brand bible, agent topology" style="flex: 1; min-width: 220px;" />
-            <select class="select" id="fileScope">
-              <option value="">default</option>
-              <option value="personal">personal</option>
-              <option value="global">global</option>
-              <option value="all">all</option>
-            </select>
-            <button class="btn btn--primary" id="fileBtn">Search</button>
+            <div class="field field--grow"><label class="lbl" for="fileQuery">File search</label><input class="input" id="fileQuery" placeholder="e.g. brand bible, agent topology" /></div>
+            <div class="field"><label class="lbl" for="fileScope">Visibility</label><select class="select" id="fileScope">
+                <option value="">default</option>
+                <option value="personal">personal</option>
+                <option value="global">global</option>
+                <option value="all">all</option>
+              </select></div>
+            <button class="btn btn--primary field-action" id="fileBtn">Search</button>
           </div>
         </div>
         <div id="fileResult" style="margin-top: 1.2rem;"></div>
@@ -159,8 +160,8 @@
 
         <div class="card card--strong">
           <div class="row">
-            <input class="input" id="metricName" placeholder="metric name, e.g. qwen.orchestrator.plan_seconds" style="flex: 1; min-width: 240px;" />
-            <button class="btn btn--primary" id="metricBtn">Render chart</button>
+            <div class="field field--grow"><label class="lbl" for="metricName">Metric name</label><input class="input" id="metricName" placeholder="e.g. qwen.orchestrator.plan_seconds" /></div>
+            <button class="btn btn--primary field-action" id="metricBtn">Render chart</button>
           </div>
         </div>
         <div id="metricResult" style="margin-top: 1.2rem;"></div>

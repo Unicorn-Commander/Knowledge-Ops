@@ -113,7 +113,12 @@ def _scan(path: str, text: str, metadata: dict[str, Any]) -> list[Finding]:
     return findings
 
 
-def _read_regular_file(root_fd: int, relative: Path) -> bytes:
+def _read_regular_file(
+    root_fd: int,
+    relative: Path,
+    *,
+    max_bytes: int = MAX_DOCUMENT_BYTES,
+) -> bytes:
     if not hasattr(os, "O_NOFOLLOW"):
         raise RuntimeError("OpenWiki import requires no-follow filesystem support")
     directory_fd = os.dup(root_fd)
@@ -135,7 +140,7 @@ def _read_regular_file(root_fd: int, relative: Path) -> bytes:
             if not stat.S_ISREG(os.fstat(file_fd).st_mode):
                 raise ValueError(f"OpenWiki Markdown entry is not a file: {relative.name}")
             with os.fdopen(file_fd, "rb", closefd=False) as handle:
-                return handle.read(MAX_DOCUMENT_BYTES + 1)
+                return handle.read(max_bytes + 1)
         finally:
             os.close(file_fd)
     except OSError as exc:
@@ -316,21 +321,76 @@ def get_import(import_id: str, principal: Principal) -> dict[str, Any]:
     return result
 
 
-def _verified_manifest(import_id: str) -> tuple[dict[str, Any], Path]:
-    base = (settings.openwiki_staging_dir / import_id).resolve()
-    if not base.is_relative_to(settings.openwiki_staging_dir.resolve()):
+def _verified_manifest(import_id: str) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """Capture the exact staged bytes whose manifest digests are verified."""
+    if not re.fullmatch(r"ow-[a-f0-9]{20}", import_id):
         raise ValueError("invalid OpenWiki import id")
-    manifest_path = base / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("OpenWiki import requires no-follow filesystem support")
+    try:
+        root_fd = os.open(
+            settings.openwiki_staging_dir,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+    except OSError as exc:
+        raise ValueError("OpenWiki staging root could not be opened safely") from exc
+    try:
+        manifest_bytes = _read_regular_file(
+            root_fd,
+            Path(import_id) / "manifest.json",
+            max_bytes=MAX_DOCUMENT_BYTES,
+        )
+        if len(manifest_bytes) > MAX_DOCUMENT_BYTES:
+            raise ValueError("staging manifest exceeds the size limit")
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("staging manifest is invalid") from exc
+        if not isinstance(manifest, dict):
+            raise ValueError("staging manifest is invalid")
+        documents = manifest.get("documents")
+        if not isinstance(documents, list):
+            raise ValueError("staging manifest document list is invalid")
+        captured: dict[str, bytes] = {}
+        for doc in documents:
+            if not isinstance(doc, dict):
+                raise ValueError("staging manifest document entry is invalid")
+            raw_path = doc.get("path")
+            raw_digest = doc.get("sha256")
+            if (
+                not isinstance(raw_path, str)
+                or not raw_path
+                or "\\" in raw_path
+                or not isinstance(raw_digest, str)
+                or not re.fullmatch(r"[a-f0-9]{64}", raw_digest)
+            ):
+                raise ValueError("staging manifest document entry is invalid")
+            relative = Path(raw_path)
+            if relative.is_absolute() or ".." in relative.parts or relative.as_posix() != raw_path:
+                raise ValueError("staging document escapes snapshot")
+            if raw_path in captured:
+                raise ValueError("staging manifest contains a duplicate document")
+            source_bytes = _read_regular_file(
+                root_fd,
+                Path(import_id) / "documents" / relative,
+            )
+            if len(source_bytes) > MAX_DOCUMENT_BYTES:
+                raise ValueError(f"staging document exceeds the size limit: {relative.name}")
+            declared_bytes = doc.get("bytes")
+            if (
+                isinstance(declared_bytes, bool)
+                or not isinstance(declared_bytes, int)
+                or declared_bytes != len(source_bytes)
+            ):
+                raise ValueError("staging snapshot has changed since validation")
+            if hashlib.sha256(source_bytes).hexdigest() != raw_digest:
+                raise ValueError("staging snapshot has changed since validation")
+            captured[raw_path] = source_bytes
+    finally:
+        os.close(root_fd)
     if manifest.get("import_id") != import_id:
         raise ValueError("staging manifest identity mismatch")
-    for doc in manifest.get("documents") or []:
-        path = (base / "documents" / doc["path"]).resolve()
-        if not path.is_relative_to(base / "documents"):
-            raise ValueError("staging document escapes snapshot")
-        if hashlib.sha256(path.read_bytes()).hexdigest() != doc["sha256"]:
-            raise ValueError("staging snapshot has changed since validation")
-    return manifest, base
+    return manifest, captured
 
 
 def verify_staging_snapshots() -> dict[str, Any]:
@@ -434,12 +494,15 @@ def approve_import(import_id: str, principal: Principal, note: str, *, accept_pi
     if pii and not accept_pii:
         raise ValueError("PII findings require an explicit accept_pii review decision")
 
-    manifest, base = _verified_manifest(import_id)
+    manifest, captured = _verified_manifest(import_id)
     reviewed_at = now()
     publications: list[dict[str, Any]] = []
     for doc in manifest["documents"]:
         target_scope, target_owner = authorized_write_target(principal, doc["scope"], doc.get("owner"))
-        body = (base / "documents" / doc["path"]).read_text(encoding="utf-8")
+        try:
+            body = captured[doc["path"]].decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError("staging document is not valid UTF-8") from exc
         publications.append({
             "path": f"openwiki/{doc['path']}",
             "md": body,

@@ -218,7 +218,7 @@ class DurableWorker:
         if not self._started:
             self.start()
         scheduled = enqueue_due_refresh_jobs(actor=self.worker_id, at=at)
-        local_deletions = reconcile_pending_deletions()
+        local_deletions = reconcile_pending_deletions(limit=settings.worker_batch_size)
         self._publish_disabled_sources()
         refresh_results: list[dict[str, Any]] = []
         deletion_results: list[dict[str, Any]] = []
@@ -244,7 +244,9 @@ class DurableWorker:
             "scheduled": len(scheduled),
             "refresh_processed": len(refresh_results),
             "deletions_processed": len(deletion_results),
-            "local_deletions_pending": local_deletions["pending"],
+            "local_deletions_processed": local_deletions["processed"],
+            "local_deletions_pending": local_deletions["backlog"],
+            "local_deletions_deferred": local_deletions["remaining"],
             "refresh_adapters": sorted(self.refresh_adapters),
             "deletion_adapters": sorted(self.deletion_adapters),
         }

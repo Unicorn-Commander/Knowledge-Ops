@@ -314,13 +314,13 @@ function editDoc(doc) {
   doc = doc || { path: "", body: "", scope: "personal", owner: "", review_due_at: "" };
   pane.innerHTML = `
     <h2 class="section" style="margin-top:0;">${isNew ? "New document" : "Edit document"}</h2>
-    <div class="field"><label class="lbl">Path</label><input class="input mono" id="edPath" value="${esc(doc.path)}" placeholder="folder/title.md" ${isNew ? "" : "readonly"} /></div>
+    <div class="field"><label class="lbl" for="edPath">Path</label><input class="input mono" id="edPath" value="${esc(doc.path)}" placeholder="folder/title.md" ${isNew ? "" : "readonly"} /></div>
     <div class="row" style="margin-bottom:.8rem;">
       <div><label class="lbl" for="edScope">Visibility</label><select class="select" id="edScope"><option ${doc.scope==='personal'?'selected':''}>personal</option><option ${doc.scope==='global'?'selected':''}>global</option></select></div>
       ${isNew ? '<div><label class="lbl" for="edValidFrom">Valid from</label><input class="input" id="edValidFrom" type="datetime-local" /></div><div><label class="lbl" for="edSupersedes">Supersedes ID</label><input class="input mono" id="edSupersedes" /></div>' : ''}
       <div><label class="lbl" for="edReviewDue">Review due</label><input class="input" id="edReviewDue" type="datetime-local" value="${esc(localDateValue(doc.review_due_at))}" /></div>
     </div>
-    <div class="field"><label class="lbl">Markdown</label><textarea class="textarea" id="edBody" style="min-height:280px;">${esc(doc.body)}</textarea></div>
+    <div class="field"><label class="lbl" for="edBody">Markdown</label><textarea class="textarea" id="edBody" style="min-height:280px;">${esc(doc.body)}</textarea></div>
     <div class="row"><button class="btn btn--primary" id="edSave">Save</button><button class="btn" id="edCancel">Cancel</button></div>`;
   $("#edCancel").addEventListener("click", () => { if (isNew) { pane.innerHTML = `<div class="empty"><div class="big">▤</div>Select a document.</div>`; } else { viewDoc(doc.id); } });
   $("#edSave").addEventListener("click", async () => {

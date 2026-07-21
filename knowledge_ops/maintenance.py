@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sqlite3
+import stat
 import tarfile
 import tempfile
 from typing import Any, Iterator
@@ -31,26 +32,98 @@ def _sha256(path: Path) -> str:
 
 
 def _copy_tree(source: Path, destination: Path) -> int:
-    if source.is_symlink():
-        raise ValueError("backup roots must not be symbolic links")
-    if not source.exists():
+    """Copy a tree through no-follow descriptors into a controlled snapshot."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("backup requires no-follow filesystem support")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(source, flags)
+    except FileNotFoundError:
         return 0
-    if not source.is_dir():
-        raise ValueError("backup root must be a directory")
-    copied = 0
-    for path in sorted(source.rglob("*")):
-        if path.is_symlink():
-            raise ValueError(f"backup source contains a symbolic link: {path.relative_to(source)}")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            raise ValueError(f"backup source contains an unsupported entry: {path.relative_to(source)}")
-        relative = path.relative_to(source)
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, target)
-        copied += 1
-    return copied
+    except OSError as exc:
+        raise ValueError("backup root must be a real directory, not a symbolic link") from exc
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
+
+    def same_entry(expected: os.stat_result, opened: os.stat_result) -> bool:
+        return (
+            expected.st_dev == opened.st_dev
+            and expected.st_ino == opened.st_ino
+            and stat.S_IFMT(expected.st_mode) == stat.S_IFMT(opened.st_mode)
+        )
+
+    def copy_directory(directory_fd: int, relative: Path) -> int:
+        copied = 0
+        with os.scandir(directory_fd) as entries:
+            ordered = sorted(entries, key=lambda item: item.name)
+            for entry in ordered:
+                entry_relative = relative / entry.name
+                try:
+                    expected = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise ValueError(
+                        f"backup source entry could not be inspected safely: {entry_relative}"
+                    ) from exc
+                if stat.S_ISLNK(expected.st_mode):
+                    raise ValueError(
+                        f"backup source contains a symbolic link: {entry_relative}"
+                    )
+                if stat.S_ISDIR(expected.st_mode):
+                    try:
+                        child_fd = os.open(entry.name, flags, dir_fd=directory_fd)
+                    except OSError as exc:
+                        raise ValueError(
+                            f"backup source directory changed or could not be opened safely: {entry_relative}"
+                        ) from exc
+                    try:
+                        if not same_entry(expected, os.fstat(child_fd)):
+                            raise ValueError(
+                                f"backup source directory changed while opening: {entry_relative}"
+                            )
+                        target_dir = destination / entry_relative
+                        target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        target_dir.chmod(0o700)
+                        copied += copy_directory(child_fd, entry_relative)
+                    finally:
+                        os.close(child_fd)
+                    continue
+                if not stat.S_ISREG(expected.st_mode):
+                    raise ValueError(
+                        f"backup source contains an unsupported entry: {entry_relative}"
+                    )
+                try:
+                    file_fd = os.open(
+                        entry.name,
+                        os.O_RDONLY | os.O_NOFOLLOW,
+                        dir_fd=directory_fd,
+                    )
+                except OSError as exc:
+                    raise ValueError(
+                        f"backup source file changed or could not be opened safely: {entry_relative}"
+                    ) from exc
+                try:
+                    opened = os.fstat(file_fd)
+                    if not stat.S_ISREG(opened.st_mode) or not same_entry(expected, opened):
+                        raise ValueError(
+                            f"backup source file changed while opening: {entry_relative}"
+                    )
+                    target = destination / entry_relative
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    with (
+                        os.fdopen(file_fd, "rb", closefd=False) as input_stream,
+                        target.open("xb") as output_stream,
+                    ):
+                        shutil.copyfileobj(input_stream, output_stream)
+                    target.chmod(0o600)
+                finally:
+                    os.close(file_fd)
+                copied += 1
+        return copied
+
+    try:
+        return copy_directory(root_fd, Path())
+    finally:
+        os.close(root_fd)
 
 
 def _secure_tree(root: Path) -> None:
@@ -338,7 +411,7 @@ def verify_restored_root(root: Path) -> dict[str, Any]:
         init_db()
         reindex = reindex_wiki()
         repaired = sync_wiki_to_disk()
-        deletions = reconcile_pending_deletions(include_completed=True)
+        deletions = reconcile_pending_deletions(limit=settings.worker_batch_size)
         try:
             openwiki = verify_staging_snapshots()
         except Exception as exc:

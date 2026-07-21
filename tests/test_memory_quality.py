@@ -192,8 +192,11 @@ def test_tombstone_projection_cleanup_retries_after_interruption(tmp_path, monke
     monkeypatch.setattr(config.settings, "default_file_roots", [config.settings.wiki_dir])
     assert index_root(config.settings.wiki_dir, scope="global", owner="org") > 0
     assert reconcile_pending_deletions(include_completed=True) == {
+        "processed": 1,
         "completed": 1,
         "pending": 0,
+        "remaining": 0,
+        "backlog": 0,
     }
     assert not projection.exists()
     with connect() as db:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 import json
 import math
 import re
@@ -72,23 +73,35 @@ def sanitize_receipt(value: object, *, _depth: int = 0) -> dict[str, Any]:
         return {}
     cleaned: dict[str, Any] = {}
     allowed_status = {"ok", "success", "succeeded", "complete", "completed", "unchanged"}
-    for raw_key, raw_value in list(value.items())[:40]:
-        key = str(raw_key)
+    # Call the built-in implementation so a hostile dict subclass cannot run an
+    # overridden ``items`` method, and never stringify adapter-controlled keys.
+    for raw_key, raw_value in islice(dict.items(value), 40):
+        if type(raw_key) is not str:
+            continue
+        key = raw_key
         if key in _RECEIPT_NESTED_KEYS and isinstance(raw_value, dict):
             cleaned[key] = sanitize_receipt(raw_value, _depth=_depth + 1)
-        elif key in {"status", "outcome"} and str(raw_value).lower() in allowed_status:
-            cleaned[key] = str(raw_value).lower()
-        elif key in _RECEIPT_NUMBER_KEYS and isinstance(raw_value, bool):
+        elif key in {"status", "outcome"} and type(raw_value) is str:
+            status = raw_value.lower()
+            if status in allowed_status:
+                cleaned[key] = status
+        elif key in _RECEIPT_NUMBER_KEYS and type(raw_value) is bool:
             cleaned[key] = raw_value
-        elif key in _RECEIPT_NUMBER_KEYS and isinstance(raw_value, (int, float)):
-            numeric = float(raw_value)
-            if math.isfinite(numeric) and 0 <= numeric <= 1_000_000_000_000:
+        elif key in _RECEIPT_NUMBER_KEYS and type(raw_value) is int:
+            if 0 <= raw_value <= 1_000_000_000_000:
                 cleaned[key] = raw_value
-        elif key in _RECEIPT_DIGEST_KEYS and re.fullmatch(r"[a-fA-F0-9]{32,128}", str(raw_value)):
-            cleaned[key] = str(raw_value).lower()
-        elif key in _RECEIPT_TIME_KEYS:
+        elif key in _RECEIPT_NUMBER_KEYS and type(raw_value) is float:
+            if math.isfinite(raw_value) and 0 <= raw_value <= 1_000_000_000_000:
+                cleaned[key] = raw_value
+        elif (
+            key in _RECEIPT_DIGEST_KEYS
+            and type(raw_value) is str
+            and re.fullmatch(r"[a-fA-F0-9]{32,128}", raw_value)
+        ):
+            cleaned[key] = raw_value.lower()
+        elif key in _RECEIPT_TIME_KEYS and type(raw_value) is str:
             try:
-                cleaned[key] = _timestamp(str(raw_value))
+                cleaned[key] = _timestamp(raw_value)
             except (ValueError, TypeError):
                 pass
     return cleaned
@@ -597,6 +610,18 @@ def redrive_deletion_task(task_id: str, *, at: str | None = None) -> dict[str, A
         row = db.execute(
             "SELECT * FROM deletion_outbox WHERE task_id=?", (task_id,)
         ).fetchone()
+        event = db.execute(
+            "SELECT projections_json FROM deletion_events WHERE deletion_id=?",
+            (row["deletion_id"],),
+        ).fetchone()
+        if event:
+            projections = json.loads(event["projections_json"] or "{}")
+            if "source_owner_outbox" in projections:
+                projections["source_owner_outbox"] = "pending"
+                db.execute(
+                    "UPDATE deletion_events SET projections_json=? WHERE deletion_id=?",
+                    (json_dumps(projections), row["deletion_id"]),
+                )
     return _row(row) or {}
 
 

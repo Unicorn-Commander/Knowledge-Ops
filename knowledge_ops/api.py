@@ -84,9 +84,13 @@ async def lifespan(app: FastAPI):
         repaired = sync_wiki_to_disk()
         if repaired:
             logger.warning("repaired %d wiki markdown projections from canonical storage", repaired)
-        deletions = reconcile_pending_deletions(include_completed=True)
-        if deletions["pending"]:
-            logger.error("%d deletion receipts still have pending projections", deletions["pending"])
+        deletions = reconcile_pending_deletions(limit=settings.worker_batch_size)
+        if deletions["backlog"]:
+            logger.error(
+                "%d deletion receipts still have pending projections; %d candidates deferred",
+                deletions["backlog"],
+                deletions["remaining"],
+            )
     except Exception as exc:  # never let seeding crash startup
         logger.error(
             "wiki seed-on-startup failed code=%s",
@@ -111,8 +115,9 @@ async def _on_validation_error(request: Request, exc: RequestValidationError) ->
 @app.exception_handler(AuthorizationError)
 async def _on_forbidden(request: Request, exc: AuthorizationError) -> JSONResponse:
     try:
+        actor = getattr(request.state, "authenticated_subject", "anonymous")
         record_audit(
-            "authenticated", "auth.api.authorization", request.url.path, "denied",
+            actor, "auth.api.authorization", request.url.path, "denied",
             {"reason_code": "permission_denied"},
         )
     except Exception as audit_exc:
@@ -143,15 +148,6 @@ def current_principal(request: Request) -> Principal:
             request.headers.get("authorization"),
             require_auth=settings.api_require_auth,
         )
-        if settings.api_require_auth and principal.issuer in settings.api_trusted_issuers:
-            for identity in sorted(principal.identities - {principal.subject.casefold()}):
-                if "@" in identity:
-                    migrate_verified_email_ownership(
-                        issuer=principal.issuer,
-                        subject=principal.subject,
-                        verified_email=identity,
-                    )
-        return principal
     except AuthorizationError as exc:
         try:
             record_audit(
@@ -164,6 +160,16 @@ def current_principal(request: Request) -> Principal:
                 sanitize_error(audit_exc, category="audit_persistence_failed"),
             )
         raise HTTPException(status_code=401, detail=str(exc), headers={"WWW-Authenticate": "Bearer"}) from exc
+    request.state.authenticated_subject = principal.subject
+    if settings.api_require_auth and principal.issuer in settings.api_trusted_issuers:
+        for identity in sorted(principal.identities - {principal.subject.casefold()}):
+            if "@" in identity:
+                migrate_verified_email_ownership(
+                    issuer=principal.issuer,
+                    subject=principal.subject,
+                    verified_email=identity,
+                )
+    return principal
 
 
 ApiPrincipal = Annotated[Principal, Depends(current_principal)]

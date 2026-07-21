@@ -67,6 +67,14 @@ def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     assert "overflow-x: auto" not in mobile_css.split("@media", 1)[0]
     assert '>Ready<' not in html and '>Checking<' in html
     assert 'textContent = "Ready"' in js and 'textContent = "Offline"' in js
+    for control_id in ("askQuery", "wikiFilter", "fileQuery", "fileScope", "metricName"):
+        assert f'for="{control_id}"' in html
+    for control_id in ("edPath", "edBody"):
+        assert f'for="{control_id}"' in js
+    brand_rule = css.split(".brand {", 1)[1].split("}", 1)[0]
+    footer_link_rule = css.split("footer.foot a {", 1)[1].split("}", 1)[0]
+    assert "min-height: 44px" in brand_rule
+    assert "min-height: 44px" in footer_link_rule
 
 
 def test_info_route(tmp_path, monkeypatch):

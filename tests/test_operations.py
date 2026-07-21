@@ -543,6 +543,32 @@ def test_deletion_outbox_success_is_visible_and_receipt_is_sanitized(tmp_path, m
     assert reconcile_pending_deletions()["pending"] == 0
 
 
+def test_receipt_sanitizer_rejects_nonfinite_huge_and_hostile_values():
+    from knowledge_ops.operations import sanitize_receipt
+
+    class HostileKey:
+        def __str__(self):
+            raise AssertionError("adapter-controlled keys must not be stringified")
+
+    class HostileDict(dict):
+        def items(self):
+            raise AssertionError("adapter-controlled items override must not run")
+
+    receipt = HostileDict({
+        "count": 10**10_000,
+        "failed": float("nan"),
+        "total": float("inf"),
+        HostileKey(): "secret",
+        "token": "secret",
+        "summary": {"processed": 3, "raw": "secret"},
+        "status": "SUCCESS",
+    })
+    assert sanitize_receipt(receipt) == {
+        "summary": {"processed": 3},
+        "status": "success",
+    }
+
+
 def test_completed_deletions_are_not_reprocessed_by_worker_poll(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
     from knowledge_ops.authorization import system_principal
@@ -560,10 +586,62 @@ def test_completed_deletions_are_not_reprocessed_by_worker_poll(tmp_path, monkey
         return real_reconcile(deletion_id)
 
     monkeypatch.setattr(wiki, "_reconcile_deletion", counted)
-    assert wiki.reconcile_pending_deletions() == {"completed": 0, "pending": 0}
+    assert wiki.reconcile_pending_deletions() == {
+        "processed": 0,
+        "completed": 0,
+        "pending": 0,
+        "remaining": 0,
+        "backlog": 0,
+    }
     assert calls == 0
-    assert wiki.reconcile_pending_deletions(include_completed=True)["completed"] == 1
+    scrub = wiki.reconcile_pending_deletions(include_completed=True)
+    assert scrub == {
+        "processed": 1,
+        "completed": 1,
+        "pending": 0,
+        "remaining": 0,
+        "backlog": 0,
+    }
     assert calls == 1
+
+
+def test_deletion_reconciliation_processes_only_one_bounded_batch(tmp_path, monkeypatch):
+    _settings(tmp_path, monkeypatch)
+    import knowledge_ops.config as config
+    from knowledge_ops.authorization import system_principal
+    import knowledge_ops.wiki as wiki
+
+    monkeypatch.setattr(config.settings, "deletion_targets", {"crm": "crm-delete"})
+    for index in range(5):
+        doc_id = wiki.upsert_doc(f"external/batch-{index}.md", f"# Batch {index}")
+        _provenance(doc_id, source_id=f"record-{index}")
+        receipt = wiki.tombstone_doc(
+            doc_id, principal=system_principal(), reason="source erasure"
+        )
+        assert receipt["projections"]["source_owner_outbox"] == "pending"
+
+    calls = 0
+    real_reconcile = wiki._reconcile_deletion
+
+    def counted(deletion_id):
+        nonlocal calls
+        calls += 1
+        return real_reconcile(deletion_id)
+
+    monkeypatch.setattr(wiki, "_reconcile_deletion", counted)
+    result = wiki.reconcile_pending_deletions(limit=2)
+    assert calls == 2
+    assert result == {
+        "processed": 2,
+        "completed": 0,
+        "pending": 2,
+        "remaining": 3,
+        "backlog": 5,
+    }
+    with pytest.raises(ValueError, match="positive integer"):
+        wiki.reconcile_pending_deletions(limit=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        wiki.reconcile_pending_deletions(limit=True)
 
 
 def test_admin_can_redrive_terminal_deletion_with_audit(tmp_path, monkeypatch):
@@ -574,7 +652,7 @@ def test_admin_can_redrive_terminal_deletion_with_audit(tmp_path, monkeypatch):
     from knowledge_ops.authorization import system_principal
     from knowledge_ops.operations import claim_deletion_task, finish_deletion_task
     from knowledge_ops.storage import connect
-    from knowledge_ops.wiki import tombstone_doc, upsert_doc
+    from knowledge_ops.wiki import reconcile_pending_deletions, tombstone_doc, upsert_doc
 
     monkeypatch.setattr(config.settings, "deletion_targets", {"crm": "crm-delete"})
     doc_id = upsert_doc("external/redrive.md", "# Redrive")
@@ -590,6 +668,14 @@ def test_admin_can_redrive_terminal_deletion_with_audit(tmp_path, monkeypatch):
         if attempt == 0:
             assert failed["status"] == "pending"
     assert failed["status"] == "failed"
+    terminal = reconcile_pending_deletions()
+    assert terminal["processed"] == 1 and terminal["backlog"] == 0
+    with connect() as db:
+        failed_projection = json.loads(db.execute(
+            "SELECT projections_json FROM deletion_events WHERE deletion_id=?",
+            (failed["deletion_id"],),
+        ).fetchone()[0])
+    assert failed_projection["source_owner_outbox"] == "failed"
 
     with TestClient(app) as client:
         response = client.post(f"/kb.deletion_outbox/{failed['task_id']}/redrive")
@@ -597,10 +683,80 @@ def test_admin_can_redrive_terminal_deletion_with_audit(tmp_path, monkeypatch):
     task = response.json()["task"]
     assert task["status"] == "pending" and task["attempt_count"] == 0
     with connect() as db:
+        projection = json.loads(db.execute(
+            "SELECT projections_json FROM deletion_events WHERE deletion_id=?",
+            (task["deletion_id"],),
+        ).fetchone()[0])
         audit = db.execute(
             "SELECT resource, outcome FROM audit_events WHERE action='deletion.outbox_redrive'"
         ).fetchone()
+    assert projection["source_owner_outbox"] == "pending"
     assert tuple(audit) == (failed["task_id"], "success")
+
+    claimed = claim_deletion_task(
+        "worker", adapters={"crm-delete"}, at="2099-01-01T00:00:02Z"
+    )
+    assert claimed and claimed["task_id"] == failed["task_id"]
+    succeeded = finish_deletion_task(
+        claimed["task_id"],
+        worker_id="worker",
+        lease_token=claimed["lease_token"],
+        succeeded=True,
+        result={"deleted": 1},
+        at="2099-01-01T00:00:02Z",
+    )
+    assert succeeded["status"] == "succeeded"
+    converged = reconcile_pending_deletions()
+    assert converged["completed"] == 1 and converged["backlog"] == 0
+    with connect() as db:
+        projection = json.loads(db.execute(
+            "SELECT projections_json FROM deletion_events WHERE deletion_id=?",
+            (task["deletion_id"],),
+        ).fetchone()[0])
+    assert projection["source_owner_outbox"] == "success"
+
+
+def test_rest_authorization_denial_audits_authenticated_subject(tmp_path, monkeypatch):
+    _settings(tmp_path, monkeypatch)
+    from fastapi.testclient import TestClient
+    import knowledge_ops.api as api
+    import knowledge_ops.config as config
+    from knowledge_ops.authorization import AuthorizationError, Principal
+    from knowledge_ops.storage import connect
+
+    monkeypatch.setattr(config.settings, "api_require_auth", True)
+
+    def authenticate(authorization, *, require_auth):
+        assert require_auth is True
+        if authorization == "Bearer verified":
+            return Principal(
+                "auditor-user",
+                scopes=frozenset({"read:knowledge"}),
+                identities=frozenset({"auditor-user"}),
+            )
+        raise AuthorizationError("invalid token")
+
+    monkeypatch.setattr(api, "principal_from_authorization", authenticate)
+    with TestClient(api.app) as client:
+        denied = client.get(
+            "/kb.audit", headers={"authorization": "Bearer verified"}
+        )
+        unauthenticated = client.get(
+            "/kb.docs", headers={"authorization": "Bearer invalid"}
+        )
+    assert denied.status_code == 403
+    assert unauthenticated.status_code == 401
+    with connect() as db:
+        authorization_actor = db.execute(
+            """SELECT actor FROM audit_events
+               WHERE action='auth.api.authorization' ORDER BY recorded_at DESC LIMIT 1"""
+        ).fetchone()[0]
+        authentication_actor = db.execute(
+            """SELECT actor FROM audit_events
+               WHERE action='auth.api.authentication' ORDER BY recorded_at DESC LIMIT 1"""
+        ).fetchone()[0]
+    assert authorization_actor == "auditor-user"
+    assert authentication_actor == "anonymous"
 
 
 def test_metrics_are_authenticated_aggregates_without_identifier_labels(tmp_path, monkeypatch):
@@ -696,6 +852,42 @@ def test_backup_rejects_symbolic_links_in_retained_projections(tmp_path, monkeyp
     )
     with pytest.raises(ValueError, match="symbolic link"):
         create_backup(tmp_path / "symlink-backup.tar.gz")
+
+
+def test_backup_rejects_a_file_swapped_to_symlink_after_inspection(tmp_path, monkeypatch):
+    _settings(tmp_path, monkeypatch)
+    import knowledge_ops.config as config
+    import knowledge_ops.maintenance as maintenance
+    from knowledge_ops.wiki import upsert_doc
+
+    upsert_doc("facts/source.md", "# Original\n\nSafe content.")
+    source = config.settings.wiki_dir / "facts" / "source.md"
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("outside-secret-value")
+    archive = tmp_path / "swapped-backup.tar.gz"
+    real_open = maintenance.os.open
+    swapped = False
+
+    def swapping_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        if (
+            path == "source.md"
+            and dir_fd is not None
+            and not flags & os.O_DIRECTORY
+            and not swapped
+        ):
+            swapped = True
+            source.unlink()
+            source.symlink_to(outside)
+        if dir_fd is None:
+            return real_open(path, flags, mode)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(maintenance.os, "open", swapping_open)
+    with pytest.raises(ValueError, match="opened safely|changed"):
+        maintenance.create_backup(archive)
+    assert swapped is True
+    assert not archive.exists()
 
 
 def test_backup_cannot_replace_a_split_path_live_database(tmp_path, monkeypatch):

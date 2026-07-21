@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -562,6 +563,58 @@ def test_openwiki_stages_the_same_bytes_it_validated(tmp_path, monkeypatch):
     snapshot = config.settings.openwiki_staging_dir / staged["import_id"] / "documents" / "stable.md"
     assert snapshot.read_bytes() == original
     assert pipeline.approve_import(staged["import_id"], admin, "Reviewed captured bytes")["state"] == "approved"
+
+
+@pytest.mark.parametrize("swap_kind", ["symlink", "replacement"])
+def test_openwiki_approval_publishes_the_exact_verified_bytes(
+    tmp_path, monkeypatch, swap_kind
+):
+    _settings(tmp_path, monkeypatch)
+    import knowledge_ops.config as config
+    import knowledge_ops.openwiki_pipeline as pipeline
+    from knowledge_ops.wiki import get_doc
+
+    source = tmp_path / "openwiki-output"
+    source.mkdir()
+    original = (
+        b"---\ntype: knowledge\nsource_uri: connector://stable/1\n"
+        b"scope: global\n---\n# Stable\n\nVerified bytes.\n"
+    )
+    replacement = (
+        b"---\ntype: knowledge\nsource_uri: connector://replacement/1\n"
+        b"scope: global\n---\n# Replacement\n\nUnverified bytes.\n"
+    )
+    (source / "stable.md").write_bytes(original)
+    monkeypatch.setattr(config.settings, "openwiki_import_roots", [source])
+    admin = system_principal()
+    staged = pipeline.stage_bundle(str(source), "0.2.0", admin)
+    snapshot = (
+        config.settings.openwiki_staging_dir
+        / staged["import_id"]
+        / "documents"
+        / "stable.md"
+    )
+    outside = tmp_path / "outside.md"
+    outside.write_bytes(replacement)
+    real_verified_manifest = pipeline._verified_manifest
+
+    def swap_after_verification(import_id):
+        manifest, captured = real_verified_manifest(import_id)
+        snapshot.unlink()
+        if swap_kind == "symlink":
+            snapshot.symlink_to(outside)
+        else:
+            snapshot.write_bytes(replacement)
+        return manifest, captured
+
+    monkeypatch.setattr(pipeline, "_verified_manifest", swap_after_verification)
+    approved = pipeline.approve_import(
+        staged["import_id"], admin, "Reviewed immutable snapshot"
+    )
+    assert approved["state"] == "approved"
+    doc = get_doc("openwiki/stable.md")
+    assert doc["body"].encode() == original
+    assert doc["provenance"]["content_sha256"] == hashlib.sha256(original).hexdigest()
 
 
 def test_openwiki_blocks_secret_and_prompt_injection_bundles(tmp_path, monkeypatch):
