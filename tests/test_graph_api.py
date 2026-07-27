@@ -1,14 +1,16 @@
 """Tests for the Constellation endpoints (/kb.graph, /kb.stats, /kb.me).
 
-Fully offline: Qdrant is a fake httpx client, FalkorDB stays disabled, and the
-principal is constructed directly. Covers node id format, visibility-filter
-pass-through (the exact object search_qdrant would use), the 600s cache, per-
-collection failure tolerance, the /kb.me shape, and the 403 for a principal
-without read:knowledge.
+Fully offline: Qdrant is a fake httpx client, FalkorDB is a fake redis module
+(or stays disabled), and the principal is constructed directly. Covers node id
+format, visibility-filter pass-through (the exact object search_qdrant would
+use), the link-doc node guarantee (and its visibility merge), the 600s cache,
+per-collection failure tolerance, FalkorDB typed-layer sampling, the /kb.me
+shape, and the 403 for a principal without read:knowledge.
 """
 from __future__ import annotations
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -21,10 +23,19 @@ from tests.test_federation import _seed_tmp_env
 
 
 @pytest.fixture(autouse=True)
-def _clear_graph_cache():
+def _clear_graph_cache(monkeypatch):
     graph_api._CACHE.clear()
+    graph_api._LINKS_CACHE.clear()
+    # Hermetic default: kb_graph consults the wiki link graph (SQLite). Tests
+    # that need links monkeypatch _link_graph themselves; everyone else sees
+    # an empty graph instead of whatever lives in the developer's real store.
+    monkeypatch.setattr(
+        graph_api, "_link_graph",
+        lambda principal, scope: {"links": [], "missing": [], "orphans": []},
+    )
     yield
     graph_api._CACHE.clear()
+    graph_api._LINKS_CACHE.clear()
 
 
 # ---------------------------------------------------------------- fake qdrant
@@ -191,6 +202,200 @@ def test_graph_skips_qdrant_entirely_when_disabled(monkeypatch):
     monkeypatch.setattr(config.settings, "enable_falkordb", False)
     res = asyncio.run(graph_api.kb_graph(system_principal(), scope=None, limit_per_coll=10))
     assert res["nodes"] == [] and res["edges"] == []
+
+
+# ---------------------------------------------------------------- link-doc guarantee
+def _links(*pairs):
+    return {
+        "links": [{"from_path": a, "to_path": b, "text": b} for a, b in pairs],
+        "missing": [], "orphans": [],
+    }
+
+
+def _wikipath_clauses(body):
+    must = ((body or {}).get("filter") or {}).get("must") or []
+    return [c for c in must if isinstance(c, dict) and c.get("key") == "wikipath"]
+
+
+def test_graph_guarantees_link_participating_docs(monkeypatch):
+    """A doc in the link graph but outside the sample window still gains a node
+    (one representative chunk per path), so its kind='link' edge renders."""
+    _qdrant_settings(monkeypatch, ["knowledge_ops_wiki"])
+    monkeypatch.setattr(
+        graph_api, "_link_graph",
+        lambda principal, scope: _links(("infrastructure/net.md", "infrastructure/dns.md")),
+    )
+
+    def handler(method, url, body):
+        if url.endswith("/points/scroll"):
+            if _wikipath_clauses(body):
+                # Guarantee fetch: two chunks of net.md (the duplicate must
+                # collapse to one representative) plus one chunk of dns.md.
+                return _Resp({"result": {"points": [
+                    {"id": 7, "payload": {"wikipath": "infrastructure/net.md",
+                                          "title": "Net", "text": "n", "scope": "global"}},
+                    {"id": 8, "payload": {"wikipath": "infrastructure/net.md",
+                                          "title": "Net 2", "text": "n2", "scope": "global"}},
+                    {"id": 9, "payload": {"wikipath": "infrastructure/dns.md",
+                                          "title": "DNS", "text": "d", "scope": "global"}},
+                ]}})
+            # The plain sample window is dominated by an unrelated chunk.
+            return _Resp({"result": {"points": [
+                {"id": 1, "payload": {"wikipath": "legal/contract.md",
+                                      "text": "legalese", "scope": "global"}},
+            ]}})
+        if url.endswith("/points/recommend"):
+            return _Resp({"result": []})
+        return _Resp(status=404)
+
+    calls = _install_fake_httpx(monkeypatch, handler)
+    res = asyncio.run(graph_api.kb_graph(system_principal(), scope=None, limit_per_coll=50))
+
+    refs = {n["id"]: n["ref"] for n in res["nodes"]}
+    assert refs == {
+        "knowledge_ops_wiki:1": "legal/contract.md",
+        "knowledge_ops_wiki:7": "infrastructure/net.md",
+        "knowledge_ops_wiki:9": "infrastructure/dns.md",  # id 8 = duplicate chunk, skipped
+    }
+    assert {"a": "knowledge_ops_wiki:7", "b": "knowledge_ops_wiki:9",
+            "w": 1, "kind": "link"} in res["edges"]
+    assert res["stats"]["node_count"] == 3
+
+    guarantee = [body for _m, url, body in calls
+                 if url.endswith("/points/scroll") and _wikipath_clauses(body)]
+    assert len(guarantee) == 1  # one batch call
+    assert guarantee[0]["limit"] == 2  # scroll limit = len(missing)
+    assert guarantee[0]["filter"] == {"must": [
+        {"key": "wikipath",
+         "match": {"any": ["infrastructure/dns.md", "infrastructure/net.md"]}},
+    ]}  # admin: no visibility conditions to merge
+    # Inserted before the edge passes: the recommend loop sees them too.
+    recommended = {body["positive"][0] for _m, url, body in calls
+                   if url.endswith("/points/recommend")}
+    assert {7, 9} <= recommended
+
+
+def test_graph_link_guarantee_respects_visibility_filter(monkeypatch):
+    """The guarantee fetch merges the caller's visibility filter, so a
+    scope-filtered principal cannot gain nodes their filter would hide."""
+    from knowledge_ops.adapters.qdrant import _visibility_filter
+
+    _qdrant_settings(monkeypatch, ["knowledge_ops_wiki"])
+    monkeypatch.setattr(
+        graph_api, "_link_graph",
+        lambda principal, scope: _links(("infrastructure/net.md", "infrastructure/dns.md")),
+    )
+    principal = Principal(
+        subject="aaron", scopes=frozenset({"read:knowledge"}),
+        identities=frozenset({"aaron"}),
+    )
+
+    def handler(method, url, body):
+        if url.endswith("/points/scroll"):
+            if _wikipath_clauses(body):
+                # Qdrant honoring the merged filter: the linked docs exist but
+                # sit outside this caller's visibility -> nothing comes back.
+                return _Resp({"result": {"points": []}})
+            return _Resp({"result": {"points": [
+                {"id": 1, "payload": {"wikipath": "legal/contract.md",
+                                      "text": "legalese", "scope": "global"}},
+            ]}})
+        if url.endswith("/points/recommend"):
+            return _Resp({"result": []})
+        return _Resp(status=404)
+
+    calls = _install_fake_httpx(monkeypatch, handler)
+    res = asyncio.run(graph_api.kb_graph(principal, scope=None, limit_per_coll=10))
+
+    guarantee = [body for _m, url, body in calls
+                 if url.endswith("/points/scroll") and _wikipath_clauses(body)]
+    assert len(guarantee) == 1
+    vis = _visibility_filter(principal, None)
+    assert set(vis) == {"should"}  # the default non-admin form
+    # The should-form nests intact as a single must entry beside the wikipath
+    # clause — the caller's visibility conditions stay mandatory.
+    assert guarantee[0]["filter"] == {"must": [
+        vis,
+        {"key": "wikipath",
+         "match": {"any": ["infrastructure/dns.md", "infrastructure/net.md"]}},
+    ]}
+    # No node materialized outside the caller's visibility, no phantom edges.
+    assert {n["ref"] for n in res["nodes"]} == {"legal/contract.md"}
+    assert res["edges"] == []
+
+
+def test_merge_visibility_filter_forms():
+    clause = {"key": "wikipath", "match": {"any": ["a.md"]}}
+    must_form = {"must": [{"key": "scope", "match": {"value": "global"}}]}
+    should_form = {"should": [{"key": "scope", "match": {"value": "global"}}]}
+    assert graph_api._merge_visibility_filter(None, clause) == {"must": [clause]}
+    assert graph_api._merge_visibility_filter(must_form, clause) == {
+        "must": [{"key": "scope", "match": {"value": "global"}}, clause]
+    }
+    assert graph_api._merge_visibility_filter(should_form, clause) == {
+        "must": [should_form, clause]
+    }
+
+
+# ---------------------------------------------------------------- falkordb sample
+def test_falkor_sample_prefers_typed_layer_and_falls_back(monkeypatch):
+    """Graphs with a name_norm entity layer sample it (carrying entity_type);
+    graphs without one keep today's arbitrary sample exactly."""
+    monkeypatch.setattr(
+        config.settings, "falkordb_graphs",
+        ["brigade_global", "agent_meeting_ops_canonical"],
+    )
+    monkeypatch.setattr(config.settings, "falkordb_url", "redis://falkor.test:6379")
+
+    executed: list[tuple[str, str]] = []
+
+    class _FakeRedis:
+        def execute_command(self, _cmd, graph, query):
+            executed.append((graph, query))
+            if "count(n)" in query:
+                return [["count(n)"], [[3]], []]
+            if "name_norm" in query:
+                if graph == "brigade_global":
+                    return [["hdr"], [
+                        [11, "Aaron Stransky", "Entity", "Person", 5],
+                        [12, "Magic Unicorn", "Entity", "Organization", 3],
+                    ], []]
+                return [["hdr"], [], []]  # this graph has no typed layer
+            return [["hdr"], [[21, "PDF memos (not Slack messages)", "Episodic"]], []]
+
+        def close(self):
+            pass
+
+    fake = SimpleNamespace(Redis=SimpleNamespace(from_url=lambda url, **kw: _FakeRedis()))
+    monkeypatch.setitem(sys.modules, "redis", fake)
+
+    stats, nodes = graph_api._falkor_sample_sync(
+        {"brigade_global", "agent_meeting_ops_canonical"}
+    )
+
+    assert stats == [
+        {"key": "brigade_global", "count": 3},
+        {"key": "agent_meeting_ops_canonical", "count": 3},
+    ]
+    by_id = {n["id"]: n for n in nodes}
+    typed = by_id["brigade_global:11"]
+    assert typed["label"] == "Aaron Stransky"
+    assert typed["entity_type"] == "Person"
+    assert typed["scope"] == "global"
+    assert by_id["brigade_global:12"]["entity_type"] == "Organization"
+    fallback = by_id["agent_meeting_ops_canonical:21"]
+    assert fallback["label"] == "PDF memos (not Slack messages)"
+    assert "entity_type" not in fallback  # the arbitrary layer carries no type
+
+    per_graph: dict[str, list[str]] = {}
+    for graph, query in executed:
+        per_graph.setdefault(graph, []).append(query)
+    # Typed-layer success never runs the arbitrary sample for that graph...
+    assert len(per_graph["brigade_global"]) == 2  # count + typed only
+    assert "name_norm" in per_graph["brigade_global"][1]
+    # ...while a graph without one falls back (count + typed + arbitrary).
+    assert len(per_graph["agent_meeting_ops_canonical"]) == 3
+    assert "name_norm" not in per_graph["agent_meeting_ops_canonical"][-1]
 
 
 # ---------------------------------------------------------------- kb.me + auth

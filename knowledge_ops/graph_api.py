@@ -2,8 +2,11 @@
 
 Read-only sampling of the same stores federated search uses. Qdrant sampling is
 gated by the exact same ``_visibility_filter`` that ``search_qdrant`` applies, so
-the constellation can never show a point that search would hide. Every per-store
-step degrades to "skip" — an unreachable backend thins the graph, it never 500s.
+the constellation can never show a point that search would hide. Wiki docs that
+participate in the parsed link graph are guaranteed a node (fetched through that
+same filter) even when the sample window misses them, so ``kind='link'`` edges
+never silently vanish. Every per-store step degrades to "skip" — an unreachable
+backend thins the graph, it never 500s.
 
 The full graph response is cached in-process for 10 minutes per visibility
 identity (scope, admin flag, scope-set, identity-set — identities are part of
@@ -66,6 +69,7 @@ _CROSS_EDGE_NODES = 30  # wiki vectors searched against the other collections
 _CROSS_K = 2
 _CROSS_THRESHOLD = 0.55
 _FALKOR_SAMPLE = 50
+_LINK_GUARANTEE_PATHS = 60  # link-doc node guarantee: max missing wiki paths fetched
 _SIZE_BUCKETS = (200, 500, 1000, 2000)  # text length -> node size 1..5
 
 
@@ -216,6 +220,21 @@ def _add_edges(
         })
 
 
+def _merge_visibility_filter(flt: dict | None, clause: dict) -> dict:
+    """AND a mandatory payload clause into a visibility filter.
+
+    A must-form filter contributes its clauses directly; a should-form (or any
+    other shape) nests intact as a single must entry. Either way the caller's
+    visibility conditions stay mandatory — merging can only narrow, never
+    widen, what a scope-filtered principal sees.
+    """
+    if flt is None:
+        return {"must": [clause]}
+    if set(flt) == {"must"} and isinstance(flt["must"], list):
+        return {"must": [*flt["must"], clause]}
+    return {"must": [flt, clause]}
+
+
 # ---------------------------------------------------------------- wiki links
 def _visible_wiki_docs(principal: Principal, scope: str | None) -> list[dict]:
     """Active wiki docs (path, title, body) the caller may read, in-process."""
@@ -275,8 +294,11 @@ def _readable_graphs(principal: Principal, scope: str | None) -> set[str]:
 def _falkor_sample_sync(readable: set[str]) -> tuple[list[dict], list[dict]]:
     """Per-graph node counts (+ a small node sample when non-empty).
 
-    Today every configured graph is empty, so the common path is one cheap
-    ``count(n)`` per graph; each graph degrades independently to count=0.
+    Sampling prefers the typed entity layer (nodes with ``name_norm``, busiest
+    first) over Graphiti's episodic noise; graphs without a typed layer fall
+    back to the arbitrary sample and render exactly as before. Today every
+    configured graph is empty, so the common path is one cheap ``count(n)``
+    per graph; each graph degrades independently to count=0.
     """
     stats = [{"key": graph, "count": 0} for graph in settings.falkordb_graphs]
     nodes: list[dict] = []
@@ -296,18 +318,39 @@ def _falkor_sample_sync(readable: set[str]) -> tuple[list[dict], list[dict]]:
             reply = client.execute_command("GRAPH.RO_QUERY", graph, "MATCH (n) RETURN count(n)")
             count = int(reply[1][0][0])
             if count > 0 and graph in readable:
-                sample = client.execute_command(
-                    "GRAPH.RO_QUERY", graph,
-                    "MATCH (n) RETURN id(n), "
-                    "coalesce(n.name, n.title, n.label, n.summary), labels(n)[0] "
-                    f"LIMIT {_FALKOR_SAMPLE}",
-                )
+                rows: list = []
+                try:
+                    # Typed entity layer first: our pipeline stamps name_norm,
+                    # Graphiti's episodic layer does not. Busiest entities
+                    # (highest in+out degree) lead the sample.
+                    typed = client.execute_command(
+                        "GRAPH.RO_QUERY", graph,
+                        "MATCH (n) WHERE n.name_norm IS NOT NULL "
+                        "RETURN id(n), "
+                        "coalesce(n.name, n.title, n.label, n.summary), "
+                        "labels(n)[0], n.type, "
+                        "indegree(n) + outdegree(n) AS deg "
+                        f"ORDER BY deg DESC LIMIT {_FALKOR_SAMPLE}",
+                    )
+                    rows = typed[1] if len(typed) >= 2 else []
+                except Exception:
+                    rows = []
+                if not rows:
+                    # No typed layer (e.g. agent_meeting_ops_canonical): keep
+                    # today's arbitrary sample so those graphs render unchanged.
+                    sample = client.execute_command(
+                        "GRAPH.RO_QUERY", graph,
+                        "MATCH (n) RETURN id(n), "
+                        "coalesce(n.name, n.title, n.label, n.summary), labels(n)[0] "
+                        f"LIMIT {_FALKOR_SAMPLE}",
+                    )
+                    rows = sample[1] if len(sample) >= 2 else []
                 graph_scope, _ = classify_graph(graph)
-                for row in (sample[1] if len(sample) >= 2 else []):
-                    nid, label, kind = (list(row) + [None] * 3)[:3]
+                for row in rows:
+                    nid, label, kind, entity_type = (list(row) + [None] * 4)[:4]
                     if nid is None:
                         continue
-                    nodes.append({
+                    node = {
                         "id": f"{graph}:{nid}",
                         "label": str(label or kind or nid)[:80],
                         "source": graph,
@@ -315,7 +358,10 @@ def _falkor_sample_sync(readable: set[str]) -> tuple[list[dict], list[dict]]:
                         "scope": graph_scope,
                         "size": 1,
                         "ref": str(nid),
-                    })
+                    }
+                    if entity_type:
+                        node["entity_type"] = str(entity_type)
+                    nodes.append(node)
         except Exception:
             pass
         finally:
@@ -358,6 +404,49 @@ async def kb_graph(
                 nodes.extend(_node_from_point(coll, point) for point in points)
                 coll_stats.append({"key": coll, "sampled": len(points)})
 
+            # Link-doc node guarantee: docs that participate in the parsed wiki
+            # link graph often miss the sample window, which would silently
+            # drop their kind='link' edges. Fetch one representative chunk per
+            # missing path — through the caller's visibility filter, so the
+            # guarantee can never surface a doc that search would hide — before
+            # any edge pass runs. Every step degrades to skip, like sampling.
+            wiki_colls = [c for c in points_by_coll if "wiki" in c.lower()]
+            other_colls = [c for c in points_by_coll if c not in wiki_colls]
+            if wiki_colls:
+                try:
+                    links = _link_graph(principal, scope).get("links", [])
+                except Exception:
+                    links = []
+                linked_paths = {
+                    str(link[key]) for link in links for key in ("from_path", "to_path")
+                }
+                present = {
+                    str(node["ref"]) for node in nodes
+                    if "wiki" in str(node.get("collection") or "").lower()
+                }
+                missing = sorted(linked_paths - present)[:_LINK_GUARANTEE_PATHS]
+                for coll in wiki_colls:
+                    if not missing:
+                        break
+                    flt = _merge_visibility_filter(
+                        _visibility_filter(principal, scope),
+                        {"key": "wikipath", "match": {"any": missing}},
+                    )
+                    try:
+                        fetched = await _scroll_points(client, coll, flt, len(missing))
+                    except Exception:
+                        continue  # a failed guarantee fetch thins the graph
+                    wanted = set(missing)
+                    found: set[str] = set()
+                    for point in fetched:
+                        node = _node_from_point(coll, point)
+                        if node["ref"] not in wanted or node["ref"] in found:
+                            continue  # one representative chunk per doc path
+                        found.add(node["ref"])
+                        points_by_coll[coll].append(point)
+                        nodes.append(node)
+                    missing = [path for path in missing if path not in found]
+
             known_ids = {node["id"] for node in nodes}
             seen_pairs: set[frozenset] = set()
 
@@ -373,8 +462,6 @@ async def kb_graph(
                     _add_edges(edges, seen_pairs, known_ids, f"{coll}:{pid}", coll, hits)
 
             # Cross-collection: wiki vectors searched against the other collections.
-            wiki_colls = [c for c in points_by_coll if "wiki" in c.lower()]
-            other_colls = [c for c in points_by_coll if c not in wiki_colls]
             for coll in wiki_colls:
                 sample_ids = [p.get("id") for p in points_by_coll[coll][:_CROSS_EDGE_NODES]]
                 if not sample_ids or not other_colls:
