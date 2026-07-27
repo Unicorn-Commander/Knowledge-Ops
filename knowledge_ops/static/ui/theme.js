@@ -19,6 +19,14 @@ export function currentTheme() {
 }
 
 export function initTheme() {
+  // ?theme=nebula deep-links a theme (demos, screenshots) and persists it.
+  let fromUrl = null;
+  try { fromUrl = new URLSearchParams(location.search).get("theme"); } catch { /* no URL API */ }
+  if (valid(fromUrl)) {
+    try { localStorage.setItem(KEY, fromUrl); } catch { /* private mode */ }
+    document.documentElement.setAttribute("data-theme", fromUrl);
+    return fromUrl;
+  }
   let stored = null;
   try { stored = localStorage.getItem(KEY); } catch { /* private mode */ }
   let name = valid(stored) ? stored : null;

@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!-- No hardcoded data-theme: tokens.css :root defaults to aurora, its
      prefers-color-scheme:light block serves daylight to un-themed light-OS
-     first visits, and ui/theme.js stamps the persisted/preferred theme at boot. -->
+     first visits, and ui/theme.js stamps the persisted/preferred theme at boot.
+     Shell v2 ("Observatory"): #sky is the app's substrate — one always-alive
+     constellation canvas behind everything. The bar, dock, panes, and lens
+     float over it; shell.js choreographs camera + panes per route. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -14,19 +17,10 @@
   <link rel="stylesheet" href="ui/tokens.css" />
   <link rel="stylesheet" href="ui/base.css" />
   <style>
-    /* Shell-owned STRUCTURAL styles only. All visual design belongs to ui/base.css;
-       every color below references a token from ui/tokens.css.
-       Routing hook for the design layer: the shell stamps the active route on
-       <html data-route="home|ask|...">. #view-home carries .view--bleed so
-       html[data-route="home"] can go chromeless (full-bleed constellation). */
-    .view[hidden] { display: none !important; }
+    /* Shell-owned STRUCTURAL styles only. All visual design lives in ui/base.css;
+       every color below references a token from ui/tokens.css. */
     .visually-hidden { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: var(--mu-color-dim); }
-    .dot--ok { background: var(--mu-color-success); }
-    .dot--bad { background: var(--mu-color-danger); }
-    .nav__actions { display: flex; align-items: center; gap: .6rem; }
-    .nav__search kbd { font-family: var(--mu-font-mono); font-size: .72em; color: var(--mu-color-dim); border: 1px solid var(--mu-color-border); border-radius: var(--mu-radius-sm); padding: .1em .35em; margin-left: .45em; }
-    /* theme switcher menu */
+    /* theme switcher menu (drops from the bar) */
     .theme-menu { position: relative; }
     .theme-menu__list { position: absolute; right: 0; top: calc(100% + .45rem); min-width: 15rem; z-index: 60; padding: .35rem; display: flex; flex-direction: column; gap: .1rem; }
     .theme-menu__list[hidden] { display: none !important; } /* authored display beats the UA [hidden] rule — restate it */
@@ -35,102 +29,72 @@
     .theme-menu__item:focus-visible { outline: 2px solid var(--mu-color-accent); outline-offset: -2px; }
     .theme-menu__mark { opacity: 0; width: .5rem; height: .5rem; border-radius: 50%; background: var(--mu-color-accent); flex: none; }
     .theme-menu__item[aria-checked="true"] .theme-menu__mark { opacity: 1; }
-    /* command palette (Cmd+K) */
-    .ko-palette { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center; padding: 11vh 1rem 1rem; }
-    .ko-palette[hidden] { display: none; }
-    .ko-palette__scrim { position: absolute; inset: 0; background: var(--mu-color-bg); opacity: .72; }
-    .ko-palette__panel { position: relative; width: min(41rem, 100%); max-height: 72vh; display: flex; flex-direction: column; gap: .6rem; }
-    .ko-palette__list { overflow: auto; display: flex; flex-direction: column; gap: .2rem; margin: 0; }
-    .ko-palette__opt { display: flex; align-items: center; gap: .6rem; min-height: 44px; padding: .5rem .65rem; border-radius: var(--mu-radius-sm); cursor: pointer; }
-    .ko-palette__opt[aria-selected="true"] { background: var(--mu-color-surface-strong); outline: 1px solid var(--mu-color-border-strong); }
-    .ko-palette__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ko-palette__detail { margin-left: auto; color: var(--mu-color-dim); font-size: .78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
-    /* markdown table overflow guard */
-    .tablewrap { overflow-x: auto; max-width: 100%; }
   </style>
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Skip to content</a>
 
-  <header class="nav">
-    <div class="nav__inner">
-      <a class="brand" href="#home">
-        <span class="mark" aria-hidden="true">K</span>
-        <span>
-          <span class="brand__name">Knowledge<b>-Ops</b></span>
-          <span class="brand__tag">Governed memory</span>
-        </span>
-      </a>
-      <div class="nav__actions">
-        <button type="button" class="btn btn--sm nav__search" id="globalSearchBtn" aria-keyshortcuts="Meta+K Control+K">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.75" stroke="currentColor" stroke-width="1.6"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          <span>Search</span><kbd aria-hidden="true">⌘K</kbd>
-        </button>
-        <div id="themeMenuHost"></div>
-        <div class="nav__status" id="navStatus" title="Service status" role="status" aria-live="polite">
-          <span class="dot" id="statusDot"></span>
-          <span id="statusText">Checking</span>
-        </div>
-      </div>
-    </div>
+  <!-- the substrate: one constellation, always alive, behind everything -->
+  <div id="sky" aria-hidden="true"></div>
+
+  <header class="bar">
+    <a class="brand" href="#home">
+      <span class="brand__name">Knowledge<b>-Ops</b></span>
+      <span class="brand__tag">Observatory</span>
+    </a>
+    <span class="bar__context" id="barContext" aria-hidden="true"></span>
+    <span class="bar__spacer"></span>
+    <span class="readout" id="barReadout">
+      <span id="readoutStats"></span>
+      <span class="readout__pulse" role="status" aria-live="polite"><span class="dot" id="statusDot"></span> <span id="statusText">Checking</span></span>
+    </span>
+    <div id="themeMenuHost"></div>
   </header>
 
-  <div class="shell">
-    <nav class="side" id="sideNav" aria-label="Views">
-      <a class="side__btn" data-view="home" href="#home">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 8-7 8-7-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Home</span>
-      </a>
-      <a class="side__btn" data-view="ask" href="#ask">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/></svg>
-        <span>Ask</span>
-      </a>
-      <a class="side__btn" data-view="library" href="#library">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5.5" y="4" width="13" height="16" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M9 9h6M9 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Library</span>
-      </a>
-      <a class="side__btn" data-view="review" href="#review">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Review</span>
-      </a>
-      <a class="side__btn" data-view="files" href="#files">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 4h8l4 4v12H6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4v4h4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span>Files</span>
-      </a>
-      <a class="side__btn" data-view="sources" href="#sources">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="2.6" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="17" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M9 9l6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Sources</span>
-      </a>
-      <a class="side__btn" data-view="graph" href="#graph">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.8 15.5L11.3 8M13.5 8.6l3.6 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="6" cy="17" r="1.9" fill="currentColor"/><circle cx="12.3" cy="6.4" r="1.9" fill="currentColor"/><circle cx="18" cy="14.3" r="1.9" fill="currentColor"/></svg>
-        <span>Graph</span>
-      </a>
-      <a class="side__btn" data-view="ops" href="#ops">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 17a7.5 7.5 0 0 1 15 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 17l3.4-4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        <span>Operations</span>
-      </a>
-    </nav>
+  <nav class="dock" id="dock" aria-label="Views">
+    <a class="dock__btn" data-view="home" href="#home" aria-label="Home">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 8-7 8-7-8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </a>
+    <a class="dock__btn" data-view="ask" href="#ask" aria-label="Ask">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/></svg>
+    </a>
+    <a class="dock__btn" data-view="library" href="#library" aria-label="Library">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5.5" y="4" width="13" height="16" rx="1.5" stroke="currentColor" stroke-width="1.6"/><path d="M9 9h6M9 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </a>
+    <a class="dock__btn" data-view="review" href="#review" aria-label="Review">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <a class="dock__btn" data-view="files" href="#files" aria-label="Files">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 4h8l4 4v12H6z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4v4h4" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </a>
+    <a class="dock__btn" data-view="sources" href="#sources" aria-label="Sources">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="2.6" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="17" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M9 9l6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </a>
+    <a class="dock__btn" data-view="graph" href="#graph" aria-label="Graph">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6.8 15.5L11.3 8M13.5 8.6l3.6 4.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="6" cy="17" r="1.9" fill="currentColor"/><circle cx="12.3" cy="6.4" r="1.9" fill="currentColor"/><circle cx="18" cy="14.3" r="1.9" fill="currentColor"/></svg>
+    </a>
+    <a class="dock__btn" data-view="ops" href="#ops" aria-label="Operations">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 17a7.5 7.5 0 0 1 15 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 17l3.4-4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </a>
+  </nav>
 
-    <main class="main" id="mainContent" tabindex="-1">
-      <!-- View modules own everything inside their <section>; the shell only toggles
-           visibility. #view-home is .view--bleed: with html[data-route="home"] the
-           design layer renders it chromeless / full-bleed (the constellation is the hero). -->
-      <section class="view view--bleed" id="view-home" hidden aria-label="Home"></section>
-      <section class="view" id="view-ask" hidden aria-label="Ask"></section>
-      <section class="view" id="view-library" hidden aria-label="Library"></section>
-      <section class="view" id="view-review" hidden aria-label="Review"></section>
-      <section class="view" id="view-files" hidden aria-label="Files"></section>
-      <section class="view" id="view-sources" hidden aria-label="Sources"></section>
-      <section class="view" id="view-graph" hidden aria-label="Graph"></section>
-      <section class="view" id="view-ops" hidden aria-label="Operations"></section>
-      <noscript><div class="error" style="margin:2rem;">Knowledge-Ops needs JavaScript to render the constellation. Enable it and reload.</div></noscript>
-    </main>
-  </div>
+  <main class="main" id="mainContent" tabindex="-1">
+    <!-- View modules own everything inside their <section>; the shell toggles
+         visibility and stamps html[data-route]. home + graph are .view--bleed:
+         chromeless, the sky itself is their surface. -->
+    <section class="view view--bleed" id="view-home" hidden aria-label="Home"></section>
+    <section class="view" id="view-ask" hidden aria-label="Ask"></section>
+    <section class="view" id="view-library" hidden aria-label="Library"></section>
+    <section class="view" id="view-review" hidden aria-label="Review"></section>
+    <section class="view" id="view-files" hidden aria-label="Files"></section>
+    <section class="view" id="view-sources" hidden aria-label="Sources"></section>
+    <section class="view view--bleed" id="view-graph" hidden aria-label="Graph"></section>
+    <section class="view" id="view-ops" hidden aria-label="Operations"></section>
+    <noscript><div class="error" style="margin:2rem;">Knowledge-Ops needs JavaScript to render the constellation. Enable it and reload.</div></noscript>
+  </main>
 
-  <footer class="foot">
-    <span>Magic Unicorn · Knowledge-Ops Constellation <span id="versionTag" class="dim"></span></span>
-    <span><a href="/ready">service readiness</a></span>
-  </footer>
+  <!-- the lens: ask + command + jump, mounted by ui/lens.js -->
+  <div id="lensHost"></div>
 
   <dialog class="citation-dialog" id="citationDialog" aria-labelledby="citationTitle">
     <div class="dialog__head">

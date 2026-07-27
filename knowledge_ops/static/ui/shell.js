@@ -1,18 +1,26 @@
-/* Knowledge-Ops shell — boots the Constellation UI.
-   Builds ctx {api, bus, esc, md, toast, locked, error, me}, routes on hash,
-   and hands each view its <section>. A view that fails to load or throws on
-   init never takes down the shell. Vanilla ES modules; no build step. */
+/* Knowledge-Ops shell v2 — boots the Observatory.
+   Owns the sky (one constellation substrate behind every route), the lens,
+   the bar readout, and the router. Builds ctx {api, bus, esc, md, toast,
+   locked, error, me, sky, lens} and hands each view its <section>.
+   Route changes ride the View Transitions API when available; the sky's
+   camera and grade are choreographed per route. A view that fails to load
+   or throws on init never takes down the shell. Vanilla ES modules. */
 
 import { api, KoErr } from "./api.js";
 import { createBus } from "./bus.js";
 import { initTheme, mountThemeMenu } from "./theme.js";
-import { createPalette } from "./palette.js";
+import { initSky, initHome, initGraph } from "./constellation.js";
+import { mountLens } from "./lens.js";
 import { md, esc } from "./md.js";
 
-initTheme(); // apply persisted / preferred theme before anything renders
+initTheme(); // apply persisted / preferred / ?theme= before anything renders
 
 const bus = createBus();
 const VIEWS = ["home", "ask", "library", "review", "files", "sources", "graph", "ops"];
+const VIEW_LABEL = {
+  home: "", ask: "Ask", library: "Library", review: "Review",
+  files: "Files", sources: "Sources", graph: "Graph", ops: "Operations",
+};
 const $ = (sel, root = document) => root.querySelector(sel);
 
 /* ---------- toast ---------- */
@@ -31,7 +39,7 @@ function toast(kind, msg) {
 function locked(el, what) {
   el.innerHTML = `
     <div class="card locked" role="note"
-         style="border:1px dashed var(--mu-color-border-strong); background:transparent;">
+         style="border:1px dashed var(--mu-color-border-strong); background:transparent; box-shadow:none;">
       <div class="row" style="align-items:flex-start; flex-wrap:nowrap;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"
              style="flex:none; margin-top:.15rem; color:var(--mu-color-dim);">
@@ -65,41 +73,71 @@ function error(el, err) {
 }
 
 /* ---------- ctx ---------- */
-const ctx = { api, bus, esc, md, toast, locked, error, me: null };
+const ctx = { api, bus, esc, md, toast, locked, error, me: null, sky: null, lens: null };
 
-/* ---------- hash router ---------- */
+/* ---------- hash router (view transitions + sky choreography) ---------- */
 let activeView = null;
+
 function currentView() {
   // Views may carry a query suffix (e.g. #library?path=...) — route on the bare name.
   const h = (location.hash || "#home").slice(1).split("?")[0];
   return VIEWS.includes(h) ? h : "home";
 }
-function route() {
-  const name = currentView();
-  if (name === activeView) return;
-  activeView = name;
-  document.documentElement.dataset.route = name; // design hook: chromeless home
+
+function skyModeFor(name) {
+  if (name === "home") return "hero";
+  if (name === "graph") return "immersive";
+  return "recede";
+}
+
+function applyRoute(name) {
+  document.documentElement.dataset.route = name;
+  const bc = $("#barContext");
+  if (bc) bc.textContent = VIEW_LABEL[name] || "";
   for (const v of VIEWS) {
     const section = document.getElementById("view-" + v);
     if (section) section.hidden = v !== name;
   }
-  document.querySelectorAll(".side__btn").forEach((a) => {
-    const on = a.dataset.view === name;
-    a.classList.toggle("active", on);
-    if (on) a.setAttribute("aria-current", "page");
+  document.querySelectorAll(".dock__btn").forEach((a) => {
+    if (a.dataset.view === name) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
+}
+
+function route() {
+  const name = currentView();
+  if (name === activeView) return;
+  const first = activeView === null;
+  activeView = name;
+  if (ctx.sky) ctx.sky.setMode(skyModeFor(name));
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!first && !reduced && document.startViewTransition) {
+    document.startViewTransition(() => applyRoute(name));
+  } else {
+    applyRoute(name);
+  }
   bus.emit("nav", { view: name });
 }
 
-/* ---------- status pulse (/ready every 30s) ---------- */
+/* ---------- bar readout: live sky stats + service pulse ---------- */
+function wireReadout() {
+  const statsEl = $("#readoutStats");
+  if (!statsEl) return;
+  bus.on("sky:data", ({ data } = {}) => {
+    if (!data || data.kind !== "graph") { statsEl.textContent = ""; return; }
+    const real = data.nodes.filter((n) => !n.deco).length;
+    const srcs = new Set(data.nodes.filter((n) => !n.deco).map((n) => n.source)).size;
+    statsEl.innerHTML = `<b>${real.toLocaleString()}</b> atoms · <b>${srcs}</b> sources`;
+  });
+}
+
 async function pulse() {
   const dot = $("#statusDot"), txt = $("#statusText");
   if (!dot || !txt) return;
   try {
     await api.get("/ready");
     dot.className = "dot dot--ok";
-    txt.textContent = "Ready";
+    txt.textContent = "Live";
   } catch (e) {
     dot.className = "dot dot--bad";
     txt.textContent = e && e.status === 401 ? "Signed out" : "Offline";
@@ -108,8 +146,8 @@ async function pulse() {
 
 /* ---------- view loading (resilient: one broken view never sinks boot) */
 const LOADERS = {
-  home: () => import("./constellation.js").then((m) => m.initHome),
-  graph: () => import("./constellation.js").then((m) => m.initGraph),
+  home: () => Promise.resolve(initHome),
+  graph: () => Promise.resolve(initGraph),
   ask: () => import("./views/ask.js").then((m) => m.init),
   library: () => import("./views/library.js").then((m) => m.init),
   review: () => import("./views/review.js").then((m) => m.init),
@@ -136,12 +174,12 @@ async function boot() {
   // Who am I? Optional endpoint — degrade to null on 404/401/anything.
   try { ctx.me = await api.get("/kb.me"); } catch { ctx.me = null; }
 
-  // Header chrome
-  const palette = createPalette(ctx);
-  const searchBtn = $("#globalSearchBtn");
-  if (searchBtn) searchBtn.addEventListener("click", () => palette.open());
+  // The sky first (views read ctx.sky at init), then the lens, then chrome.
+  ctx.sky = initSky($("#sky"), ctx);
+  ctx.lens = mountLens($("#lensHost"), ctx);
   const themeHost = $("#themeMenuHost");
   if (themeHost) mountThemeMenu(themeHost, bus);
+  wireReadout();
 
   // Citation dialog (shared by ask/files views)
   const dlg = $("#citationDialog");

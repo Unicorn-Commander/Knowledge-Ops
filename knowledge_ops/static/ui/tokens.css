@@ -1,6 +1,6 @@
 /* ============================================================================
-   Knowledge-Ops "Constellation" — design tokens.
-   A deep-space observatory for organizational memory.
+   Knowledge-Ops — Observatory token system (v2).
+   One instrument, four skies.
 
    Themes live on <html data-theme="aurora|daylight|nebula|midnight">.
    :root defaults = AURORA. Every contract variable is defined in ALL themes.
@@ -9,333 +9,308 @@
 
    Contract tokens (consumed by views — never restyle views directly):
      --mu-color-bg / -bg-elevated / -surface / -surface-strong
-     --mu-color-border / -border-strong
+     --mu-color-border / -border-strong        --mu-hairline
      --mu-color-text / -muted / -dim
      --mu-color-primary / -accent / -success / -warning / -danger
-     --mu-gradient-brand  --mu-shadow-glow
-     --mu-font-sans / -display / -mono
-     --mu-radius-sm / -md / -lg   --mu-container
+     --mu-brass (instrument labels)            --mu-gradient-brand
+     --mu-shadow-glow / -pane                  --mu-glass / -glass-strong
+     --mu-font-sans / -display / -mono         --mu-type-hero / -title / -section
+     --mu-radius-sm / -md / -lg / -pill        --mu-container
      --mu-src-wiki / -org-memory / -meetings / -stable / -files / -graph / -metrics
-     --mu-glow (0..1)  --mu-canvas-bg  --mu-canvas-star  --mu-canvas-edge
+     --mu-glow (0..1)  --mu-canvas-bg / -star / -edge / -label
 
-   Internal tokens (consumed only by base.css — still themed everywhere):
+   Internal tokens (base.css/shell):
      --mu-ink-on-brand  --mu-field-bg  --mu-page-bg  --mu-surface-blur
-     --mu-focus-ring
-     --mu-dur-quick / -settle / -drift   --mu-ease-settle / -drift
+     --mu-focus-ring    --mu-bar-h  --mu-dock-w  --mu-lens-w
+     --mu-dur-quick / -settle / -drift   --mu-ease-settle / -drift / -spring
+
+   Scoping rule (hard-learned): theme blocks are :root[data-theme=…] — NEVER
+   bare [data-theme] — so a data-theme attribute on an inner element can never
+   re-theme its own subtree.
    ========================================================================== */
 
+/* ------------------------------------------------------------ geometry, type
+   scale, motion — theme-invariant */
+:root {
+  --mu-container: 1120px;
+  --mu-bar-h: 3.5rem;
+  --mu-dock-w: 3.4rem;
+  --mu-lens-w: min(620px, calc(100vw - 2rem));
+
+  --mu-radius-sm: 8px;
+  --mu-radius-md: 13px;
+  --mu-radius-lg: 20px;
+  --mu-radius-pill: 999px;
+
+  --mu-font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --mu-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mu-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --mu-type-hero: clamp(2.75rem, 1.1rem + 5.6vw, 5.1rem);
+  --mu-type-title: clamp(1.65rem, 1.15rem + 1.5vw, 2.35rem);
+  --mu-type-section: 1.22rem;
+
+  --mu-dur-quick: 150ms;
+  --mu-dur-settle: 420ms;
+  --mu-dur-drift: 900ms;
+  --mu-ease-settle: cubic-bezier(0.22, 0.75, 0.22, 1);
+  --mu-ease-drift: cubic-bezier(0.3, 0.6, 0.15, 1);
+  /* critically-damped spring with a whisper of overshoot */
+  --mu-ease-spring: linear(
+    0, 0.0392 2.1%, 0.1465 4.6%, 0.3925 8.7%, 0.7237 14.1%, 0.9086 18%,
+    1.0093 21.9%, 1.0512 25.7%, 1.0559 29.8%, 1.0327 36%, 1.0059 44.5%,
+    0.9975 55.6%, 0.9997 74.4%, 1
+  );
+
+  --mu-surface-blur: 22px;
+}
+
 /* ---------------------------------------------------------------- AURORA
-   Default. Near-black blue-violet ground; violet→teal nebula gradients;
-   starlight text; glow spent sparingly and decisively. */
+   The observatory at night — deep indigo air, luminous data, brass fittings.
+   Default theme; the reference palette for the canvas. */
 :root,
 :root[data-theme="aurora"] {
   color-scheme: dark;
 
-  --mu-color-bg: #080a14;
-  --mu-color-bg-elevated: #0d1020;
-  --mu-color-surface: #10142a;
-  --mu-color-surface-strong: #171c38;
-  --mu-color-border: rgba(167, 139, 250, 0.16);
-  --mu-color-border-strong: rgba(155, 124, 246, 0.55);
-  --mu-color-text: #eef0fb;
-  --mu-color-muted: #a9b0d2;
-  --mu-color-dim: #7c84ac;
-
-  --mu-color-primary: #9b7cf6;
-  --mu-color-accent: #46c2b3;
-  --mu-color-success: #54f0b4;
-  --mu-color-warning: #ffd166;
-  --mu-color-danger: #ff6b8a;
-
-  --mu-gradient-brand: linear-gradient(135deg, #a78bfa 0%, #46c2b3 100%);
-  --mu-shadow-glow: 0 0 0 1px rgba(155, 124, 246, 0.14),
-    0 0 28px rgba(155, 124, 246, 0.22);
-
-  --mu-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mu-font-display: "Fraunces", ui-serif, "Iowan Old Style", Georgia,
-    "Times New Roman", serif;
-  --mu-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  --mu-radius-sm: 10px;
-  --mu-radius-md: 14px;
-  --mu-radius-lg: 22px;
-  --mu-container: 1180px;
-
-  --mu-src-wiki: #b487ff;
-  --mu-src-org-memory: #ff9ed8;
-  --mu-src-meetings: #5eead4;
-  --mu-src-stable: #8ab8ff;
-  --mu-src-files: #ffd166;
-  --mu-src-graph: #54f0b4;
-  --mu-src-metrics: #f0a354;
-
-  --mu-glow: 0.8;
-  --mu-canvas-bg: #05060d;
-  --mu-canvas-star: #ccd3f6;
-  --mu-canvas-edge: rgba(155, 124, 246, 0.28);
-
-  /* internal */
-  --mu-ink-on-brand: #0a0714;
-  --mu-field-bg: #0b0e1c;
   --mu-page-bg:
-    radial-gradient(1100px 620px at 85% -10%, rgba(155, 124, 246, 0.13), transparent 62%),
-    radial-gradient(900px 560px at -10% 24%, rgba(70, 194, 179, 0.09), transparent 60%),
-    #080a14;
-  --mu-surface-blur: 0px;
-  --mu-focus-ring: 0 0 0 3px rgba(70, 194, 179, 0.28);
-  --mu-dur-quick: 140ms;
-  --mu-dur-settle: 320ms;
-  --mu-dur-drift: 1600ms;
-  --mu-ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --mu-ease-drift: cubic-bezier(0.45, 0, 0.2, 1);
+    radial-gradient(120% 90% at 72% -12%, #1b1140 0%, rgba(27, 17, 64, 0) 55%),
+    radial-gradient(95% 75% at 12% 110%, #0b2230 0%, rgba(11, 34, 48, 0) 60%),
+    #070512;
+  --mu-color-bg: #070512;
+  --mu-color-bg-elevated: #100c22;
+  --mu-color-text: #ece9f8;
+  --mu-color-muted: #a9a2c7;
+  --mu-color-dim: #746d99;
+
+  --mu-color-border: rgba(236, 233, 248, 0.11);
+  --mu-color-border-strong: rgba(236, 233, 248, 0.22);
+  --mu-hairline: rgba(236, 233, 248, 0.08);
+
+  --mu-color-surface: rgba(23, 18, 46, 0.4);
+  --mu-color-surface-strong: rgba(30, 24, 60, 0.62);
+  --mu-glass: rgba(15, 12, 33, 0.55);
+  --mu-glass-strong: rgba(19, 15, 41, 0.74);
+  --mu-field-bg: rgba(9, 7, 22, 0.55);
+
+  --mu-color-primary: #a78bfa;
+  --mu-color-accent: #4ed3c2;
+  --mu-color-success: #5cd6a8;
+  --mu-color-warning: #efc48e;
+  --mu-color-danger: #f08585;
+  --mu-brass: #d9a96c;
+  --mu-ink-on-brand: #0b0714;
+  --mu-gradient-brand: linear-gradient(135deg, #a78bfa 0%, #4ed3c2 100%);
+
+  --mu-focus-ring: 0 0 0 2px rgba(167, 139, 250, 0.75);
+  --mu-shadow-glow: 0 0 44px -8px rgba(167, 139, 250, 0.5);
+  --mu-shadow-pane:
+    0 32px 90px -42px rgba(3, 2, 12, 0.95),
+    0 0 0 1px var(--mu-hairline);
+  --mu-glow: 0.9;
+
+  --mu-canvas-bg: #070512;
+  --mu-canvas-star: #d7d2f0;
+  --mu-canvas-edge: rgba(163, 156, 219, 0.24);
+  --mu-canvas-label: #d9a96c;
+
+  --mu-src-wiki: #c9b6ff;
+  --mu-src-org-memory: #7fe3d2;
+  --mu-src-meetings: #92b5f7;
+  --mu-src-stable: #efc48e;
+  --mu-src-files: #e3a6cf;
+  --mu-src-graph: #a3e8ae;
+  --mu-src-metrics: #9fb4c8;
 }
 
-/* ---------------------------------------------------------------- DAYLIGHT
-   Warm paper ground, ink text. The constellation renders as ink-and-gold
-   engraving: dark nodes, gold hairline edges. Glow is off. */
-:root[data-theme="daylight"] {
-  color-scheme: light;
-
-  --mu-color-bg: #f6f1e7;
-  --mu-color-bg-elevated: #fbf7ef;
-  --mu-color-surface: #fffdf8;
-  --mu-color-surface-strong: #f0e8d8;
-  --mu-color-border: rgba(58, 47, 38, 0.18);
-  --mu-color-border-strong: rgba(109, 77, 181, 0.5);
-  --mu-color-text: #241d13;
-  --mu-color-muted: #5b5344;
-  --mu-color-dim: #6e6455;
-
-  --mu-color-primary: #6d4db5;
-  --mu-color-accent: #0f766e;
-  --mu-color-success: #166534;
-  --mu-color-warning: #8a5306;
-  --mu-color-danger: #be123c;
-
-  --mu-gradient-brand: linear-gradient(135deg, #6d4db5 0%, #0f766e 100%);
-  --mu-shadow-glow: 0 1px 2px rgba(58, 47, 38, 0.08),
-    0 10px 28px rgba(58, 47, 38, 0.1);
-
-  --mu-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mu-font-display: "Fraunces", ui-serif, "Iowan Old Style", Georgia,
-    "Times New Roman", serif;
-  --mu-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  --mu-radius-sm: 10px;
-  --mu-radius-md: 14px;
-  --mu-radius-lg: 22px;
-  --mu-container: 1180px;
-
-  --mu-src-wiki: #6d28d9;
-  --mu-src-org-memory: #a8336f;
-  --mu-src-meetings: #0f766e;
-  --mu-src-stable: #1d4ed8;
-  --mu-src-files: #8a5306;
-  --mu-src-graph: #166534;
-  --mu-src-metrics: #b4470b;
-
-  --mu-glow: 0;
-  --mu-canvas-bg: #f2ebdc;
-  --mu-canvas-star: #2c2417;
-  --mu-canvas-edge: rgba(150, 116, 47, 0.55);
-
-  /* internal */
-  --mu-ink-on-brand: #fffdf8;
-  --mu-field-bg: #fffdf8;
-  --mu-page-bg:
-    radial-gradient(1000px 560px at 88% -12%, rgba(109, 77, 181, 0.07), transparent 60%),
-    #f6f1e7;
-  --mu-surface-blur: 0px;
-  --mu-focus-ring: 0 0 0 3px rgba(15, 118, 110, 0.28);
-  --mu-dur-quick: 140ms;
-  --mu-dur-settle: 320ms;
-  --mu-dur-drift: 1600ms;
-  --mu-ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --mu-ease-drift: cubic-bezier(0.45, 0, 0.2, 1);
-}
-
-/* ---------------------------------------------------------------- NEBULA
-   The demo-reel theme: saturated animated gradients, glass surfaces,
-   glow turned all the way up (but still deliberate). */
-:root[data-theme="nebula"] {
-  color-scheme: dark;
-
-  --mu-color-bg: #0b0620;
-  --mu-color-bg-elevated: #130b2e;
-  --mu-color-surface: rgba(255, 255, 255, 0.055);
-  --mu-color-surface-strong: rgba(255, 255, 255, 0.11);
-  --mu-color-border: rgba(255, 255, 255, 0.16);
-  --mu-color-border-strong: rgba(216, 180, 254, 0.6);
-  --mu-color-text: #f7f3ff;
-  --mu-color-muted: #c5bae8;
-  --mu-color-dim: #9a90c6;
-
-  --mu-color-primary: #b66eff;
-  --mu-color-accent: #2dd4bf;
-  --mu-color-success: #4ade80;
-  --mu-color-warning: #fbbf24;
-  --mu-color-danger: #fb7185;
-
-  --mu-gradient-brand: linear-gradient(135deg, #c084fc 0%, #818cf8 45%, #2dd4bf 100%);
-  --mu-shadow-glow: 0 0 0 1px rgba(192, 132, 252, 0.22),
-    0 0 44px rgba(182, 110, 255, 0.32);
-
-  --mu-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mu-font-display: "Fraunces", ui-serif, "Iowan Old Style", Georgia,
-    "Times New Roman", serif;
-  --mu-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  --mu-radius-sm: 10px;
-  --mu-radius-md: 14px;
-  --mu-radius-lg: 22px;
-  --mu-container: 1180px;
-
-  --mu-src-wiki: #c084fc;
-  --mu-src-org-memory: #f472b6;
-  --mu-src-meetings: #2dd4bf;
-  --mu-src-stable: #60a5fa;
-  --mu-src-files: #facc15;
-  --mu-src-graph: #4ade80;
-  --mu-src-metrics: #fb923c;
-
-  --mu-glow: 1;
-  --mu-canvas-bg: #070313;
-  --mu-canvas-star: #ead9ff;
-  --mu-canvas-edge: rgba(182, 110, 255, 0.4);
-
-  /* internal */
-  --mu-ink-on-brand: #120826;
-  --mu-field-bg: rgba(9, 4, 24, 0.72);
-  --mu-page-bg:
-    radial-gradient(1200px 700px at 80% -14%, rgba(182, 110, 255, 0.24), transparent 60%),
-    radial-gradient(1000px 640px at -12% 32%, rgba(45, 212, 191, 0.16), transparent 58%),
-    radial-gradient(900px 620px at 55% 118%, rgba(129, 140, 248, 0.18), transparent 60%),
-    #0b0620;
-  --mu-surface-blur: 14px;
-  --mu-focus-ring: 0 0 0 3px rgba(45, 212, 191, 0.32);
-  --mu-dur-quick: 140ms;
-  --mu-dur-settle: 320ms;
-  --mu-dur-drift: 1600ms;
-  --mu-ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --mu-ease-drift: cubic-bezier(0.45, 0, 0.2, 1);
-}
-
-/* ---------------------------------------------------------------- MIDNIGHT
-   Pure OLED black, minimal glow, restrained cyan. For long nights on call. */
-:root[data-theme="midnight"] {
-  color-scheme: dark;
-
-  --mu-color-bg: #000000;
-  --mu-color-bg-elevated: #05070a;
-  --mu-color-surface: #0a0d11;
-  --mu-color-surface-strong: #11161c;
-  --mu-color-border: rgba(255, 255, 255, 0.14);
-  --mu-color-border-strong: rgba(103, 232, 249, 0.42);
-  --mu-color-text: #e6edf3;
-  --mu-color-muted: #9aa7b1;
-  --mu-color-dim: #71808c;
-
-  --mu-color-primary: #22d3ee;
-  --mu-color-accent: #67e8f9;
-  --mu-color-success: #34d399;
-  --mu-color-warning: #fbbf24;
-  --mu-color-danger: #f87171;
-
-  --mu-gradient-brand: linear-gradient(135deg, #a5f3fc 0%, #22d3ee 100%);
-  --mu-shadow-glow: 0 0 0 1px rgba(34, 211, 238, 0.14),
-    0 0 16px rgba(34, 211, 238, 0.16);
-
-  --mu-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mu-font-display: "Fraunces", ui-serif, "Iowan Old Style", Georgia,
-    "Times New Roman", serif;
-  --mu-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  --mu-radius-sm: 10px;
-  --mu-radius-md: 14px;
-  --mu-radius-lg: 22px;
-  --mu-container: 1180px;
-
-  --mu-src-wiki: #a78bfa;
-  --mu-src-org-memory: #f0abcf;
-  --mu-src-meetings: #5eead4;
-  --mu-src-stable: #7dd3fc;
-  --mu-src-files: #fcd34d;
-  --mu-src-graph: #6ee7b7;
-  --mu-src-metrics: #fdba74;
-
-  --mu-glow: 0.35;
-  --mu-canvas-bg: #000000;
-  --mu-canvas-star: #d8e6ee;
-  --mu-canvas-edge: rgba(103, 232, 249, 0.22);
-
-  /* internal */
-  --mu-ink-on-brand: #04121a;
-  --mu-field-bg: #05070a;
-  --mu-page-bg: #000000;
-  --mu-surface-blur: 0px;
-  --mu-focus-ring: 0 0 0 3px rgba(103, 232, 249, 0.3);
-  --mu-dur-quick: 140ms;
-  --mu-dur-settle: 320ms;
-  --mu-dur-drift: 1600ms;
-  --mu-ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
-  --mu-ease-drift: cubic-bezier(0.45, 0, 0.2, 1);
-}
-
-/* -------------------------------------------------- un-themed light visits
-   First visit, no data-theme set, OS prefers light → daylight values.
-   Kept as an exact duplicate of [data-theme="daylight"] above; if you edit
-   one block, edit both. */
+/* Un-themed first paint on a light OS gets Daylight (theme.js then stamps the
+   persisted choice). Values mirror the Daylight block exactly. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
     color-scheme: light;
-
-    --mu-color-bg: #f6f1e7;
-    --mu-color-bg-elevated: #fbf7ef;
-    --mu-color-surface: #fffdf8;
-    --mu-color-surface-strong: #f0e8d8;
-    --mu-color-border: rgba(58, 47, 38, 0.18);
-    --mu-color-border-strong: rgba(109, 77, 181, 0.5);
-    --mu-color-text: #241d13;
-    --mu-color-muted: #5b5344;
-    --mu-color-dim: #6e6455;
-
-    --mu-color-primary: #6d4db5;
-    --mu-color-accent: #0f766e;
-    --mu-color-success: #166534;
-    --mu-color-warning: #8a5306;
-    --mu-color-danger: #be123c;
-
-    --mu-gradient-brand: linear-gradient(135deg, #6d4db5 0%, #0f766e 100%);
-    --mu-shadow-glow: 0 1px 2px rgba(58, 47, 38, 0.08),
-      0 10px 28px rgba(58, 47, 38, 0.1);
-
-    --mu-src-wiki: #6d28d9;
-    --mu-src-org-memory: #a8336f;
-    --mu-src-meetings: #0f766e;
-    --mu-src-stable: #1d4ed8;
-    --mu-src-files: #8a5306;
-    --mu-src-graph: #166534;
-    --mu-src-metrics: #b4470b;
-
-    --mu-glow: 0;
-    --mu-canvas-bg: #f2ebdc;
-    --mu-canvas-star: #2c2417;
-    --mu-canvas-edge: rgba(150, 116, 47, 0.55);
-
-    --mu-ink-on-brand: #fffdf8;
-    --mu-field-bg: #fffdf8;
     --mu-page-bg:
-      radial-gradient(1000px 560px at 88% -12%, rgba(109, 77, 181, 0.07), transparent 60%),
-      #f6f1e7;
-    --mu-surface-blur: 0px;
-    --mu-focus-ring: 0 0 0 3px rgba(15, 118, 110, 0.28);
+      radial-gradient(110% 80% at 82% -18%, #e7e2f5 0%, rgba(231, 226, 245, 0) 55%),
+      radial-gradient(95% 80% at 6% 112%, #dcebe6 0%, rgba(220, 235, 230, 0) 55%),
+      #f4f2ed;
+    --mu-color-bg: #f4f2ed;
+    --mu-color-bg-elevated: #fbfaf7;
+    --mu-color-text: #1b1730;
+    --mu-color-muted: #55506e;
+    --mu-color-dim: #85809d;
+    --mu-color-border: rgba(27, 23, 48, 0.14);
+    --mu-color-border-strong: rgba(27, 23, 48, 0.26);
+    --mu-hairline: rgba(27, 23, 48, 0.1);
+    --mu-color-surface: rgba(255, 255, 255, 0.5);
+    --mu-color-surface-strong: rgba(255, 255, 255, 0.78);
+    --mu-glass: rgba(252, 251, 247, 0.62);
+    --mu-glass-strong: rgba(253, 252, 249, 0.84);
+    --mu-field-bg: rgba(255, 255, 255, 0.66);
+    --mu-color-primary: #6d4fd8;
+    --mu-color-accent: #0f8d7f;
+    --mu-color-success: #177e5b;
+    --mu-color-warning: #9a6a1f;
+    --mu-color-danger: #c4423c;
+    --mu-brass: #8a5f2d;
+    --mu-ink-on-brand: #ffffff;
+    --mu-gradient-brand: linear-gradient(135deg, #6d4fd8 0%, #0f8d7f 100%);
+    --mu-focus-ring: 0 0 0 2px rgba(109, 79, 216, 0.6);
+    --mu-shadow-glow: 0 0 40px -10px rgba(109, 79, 216, 0.35);
+    --mu-shadow-pane:
+      0 28px 70px -38px rgba(27, 23, 48, 0.32),
+      0 0 0 1px var(--mu-hairline);
+    --mu-glow: 0.35;
+    --mu-canvas-bg: #f0eee6;
+    --mu-canvas-star: #37306b;
+    --mu-canvas-edge: rgba(55, 48, 107, 0.2);
+    --mu-canvas-label: #8a5f2d;
+    --mu-src-wiki: #6d4fd8;
+    --mu-src-org-memory: #0f8d7f;
+    --mu-src-meetings: #3b64c0;
+    --mu-src-stable: #a96f1e;
+    --mu-src-files: #b0508f;
+    --mu-src-graph: #2e7d4f;
+    --mu-src-metrics: #5b6b7e;
   }
+}
+
+/* ---------------------------------------------------------------- DAYLIGHT
+   The chart room — an antique star chart drawn in ink on cool paper. */
+:root[data-theme="daylight"] {
+  color-scheme: light;
+  --mu-page-bg:
+    radial-gradient(110% 80% at 82% -18%, #e7e2f5 0%, rgba(231, 226, 245, 0) 55%),
+    radial-gradient(95% 80% at 6% 112%, #dcebe6 0%, rgba(220, 235, 230, 0) 55%),
+    #f4f2ed;
+  --mu-color-bg: #f4f2ed;
+  --mu-color-bg-elevated: #fbfaf7;
+  --mu-color-text: #1b1730;
+  --mu-color-muted: #55506e;
+  --mu-color-dim: #85809d;
+  --mu-color-border: rgba(27, 23, 48, 0.14);
+  --mu-color-border-strong: rgba(27, 23, 48, 0.26);
+  --mu-hairline: rgba(27, 23, 48, 0.1);
+  --mu-color-surface: rgba(255, 255, 255, 0.5);
+  --mu-color-surface-strong: rgba(255, 255, 255, 0.78);
+  --mu-glass: rgba(252, 251, 247, 0.62);
+  --mu-glass-strong: rgba(253, 252, 249, 0.84);
+  --mu-field-bg: rgba(255, 255, 255, 0.66);
+  --mu-color-primary: #6d4fd8;
+  --mu-color-accent: #0f8d7f;
+  --mu-color-success: #177e5b;
+  --mu-color-warning: #9a6a1f;
+  --mu-color-danger: #c4423c;
+  --mu-brass: #8a5f2d;
+  --mu-ink-on-brand: #ffffff;
+  --mu-gradient-brand: linear-gradient(135deg, #6d4fd8 0%, #0f8d7f 100%);
+  --mu-focus-ring: 0 0 0 2px rgba(109, 79, 216, 0.6);
+  --mu-shadow-glow: 0 0 40px -10px rgba(109, 79, 216, 0.35);
+  --mu-shadow-pane:
+    0 28px 70px -38px rgba(27, 23, 48, 0.32),
+    0 0 0 1px var(--mu-hairline);
+  --mu-glow: 0.35;
+  --mu-canvas-bg: #f0eee6;
+  --mu-canvas-star: #37306b;
+  --mu-canvas-edge: rgba(55, 48, 107, 0.2);
+  --mu-canvas-label: #8a5f2d;
+  --mu-src-wiki: #6d4fd8;
+  --mu-src-org-memory: #0f8d7f;
+  --mu-src-meetings: #3b64c0;
+  --mu-src-stable: #a96f1e;
+  --mu-src-files: #b0508f;
+  --mu-src-graph: #2e7d4f;
+  --mu-src-metrics: #5b6b7e;
+}
+
+/* ---------------------------------------------------------------- NEBULA
+   The demo reel — saturated deep space, maximum glow. Aurora's bones,
+   dialed past it: for launches, screenshots, showing off. */
+:root[data-theme="nebula"] {
+  color-scheme: dark;
+  --mu-page-bg:
+    radial-gradient(120% 100% at 76% -10%, #2a0f55 0%, rgba(42, 15, 85, 0) 60%),
+    radial-gradient(100% 85% at -5% 112%, #05203f 0%, rgba(5, 32, 63, 0) 55%),
+    radial-gradient(60% 50% at 50% 120%, #34104a 0%, rgba(52, 16, 74, 0) 60%),
+    #0a0420;
+  --mu-color-bg: #0a0420;
+  --mu-color-bg-elevated: #150a33;
+  --mu-color-text: #f2ecff;
+  --mu-color-muted: #b2a6dd;
+  --mu-color-dim: #7d70ad;
+  --mu-color-border: rgba(242, 236, 255, 0.13);
+  --mu-color-border-strong: rgba(242, 236, 255, 0.24);
+  --mu-hairline: rgba(242, 236, 255, 0.1);
+  --mu-color-surface: rgba(34, 20, 70, 0.42);
+  --mu-color-surface-strong: rgba(44, 27, 88, 0.64);
+  --mu-glass: rgba(22, 11, 50, 0.58);
+  --mu-glass-strong: rgba(28, 15, 62, 0.78);
+  --mu-field-bg: rgba(14, 6, 34, 0.6);
+  --mu-color-primary: #c4a0ff;
+  --mu-color-accent: #2de0c8;
+  --mu-color-success: #5ce8b4;
+  --mu-color-warning: #ffcf8f;
+  --mu-color-danger: #ff8f9c;
+  --mu-brass: #f0b36c;
+  --mu-ink-on-brand: #12062b;
+  --mu-gradient-brand: linear-gradient(135deg, #c4a0ff 0%, #2de0c8 100%);
+  --mu-focus-ring: 0 0 0 2px rgba(196, 160, 255, 0.8);
+  --mu-shadow-glow: 0 0 60px -6px rgba(196, 160, 255, 0.6);
+  --mu-shadow-pane:
+    0 36px 100px -44px rgba(2, 1, 12, 0.95),
+    0 0 0 1px var(--mu-hairline);
+  --mu-glow: 1;
+  --mu-canvas-bg: #0a0420;
+  --mu-canvas-star: #e6ddff;
+  --mu-canvas-edge: rgba(190, 170, 255, 0.27);
+  --mu-canvas-label: #f0b36c;
+  --mu-src-wiki: #d4bcff;
+  --mu-src-org-memory: #6cf2dd;
+  --mu-src-meetings: #8fc0ff;
+  --mu-src-stable: #ffcf8f;
+  --mu-src-files: #ff9fd6;
+  --mu-src-graph: #a8f7b0;
+  --mu-src-metrics: #a6c2d8;
+}
+
+/* ---------------------------------------------------------------- MIDNIGHT
+   Lights out — true-black OLED quiet, hairlines only, glow nearly off. */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --mu-page-bg: #000000;
+  --mu-color-bg: #000000;
+  --mu-color-bg-elevated: #0c0c12;
+  --mu-color-text: #dcdae6;
+  --mu-color-muted: #9894ad;
+  --mu-color-dim: #6b6780;
+  --mu-color-border: rgba(220, 218, 230, 0.11);
+  --mu-color-border-strong: rgba(220, 218, 230, 0.2);
+  --mu-hairline: rgba(220, 218, 230, 0.08);
+  --mu-color-surface: rgba(18, 18, 26, 0.55);
+  --mu-color-surface-strong: rgba(26, 26, 36, 0.75);
+  --mu-glass: rgba(10, 10, 15, 0.62);
+  --mu-glass-strong: rgba(14, 14, 20, 0.82);
+  --mu-field-bg: rgba(8, 8, 12, 0.6);
+  --mu-color-primary: #8f7edc;
+  --mu-color-accent: #46b3a6;
+  --mu-color-success: #4fbd93;
+  --mu-color-warning: #cfa878;
+  --mu-color-danger: #d97f7f;
+  --mu-brass: #a8895d;
+  --mu-ink-on-brand: #05050a;
+  --mu-gradient-brand: linear-gradient(135deg, #8f7edc 0%, #46b3a6 100%);
+  --mu-focus-ring: 0 0 0 2px rgba(143, 126, 220, 0.7);
+  --mu-shadow-glow: 0 0 30px -12px rgba(143, 126, 220, 0.35);
+  --mu-shadow-pane:
+    0 24px 60px -36px rgba(0, 0, 0, 0.9),
+    0 0 0 1px var(--mu-hairline);
+  --mu-glow: 0.25;
+  --mu-canvas-bg: #000000;
+  --mu-canvas-star: #c9c6dc;
+  --mu-canvas-edge: rgba(150, 146, 175, 0.14);
+  --mu-canvas-label: #a8895d;
+  --mu-src-wiki: #ada0e8;
+  --mu-src-org-memory: #6fc7ba;
+  --mu-src-meetings: #84a3d8;
+  --mu-src-stable: #cfa878;
+  --mu-src-files: #c491b4;
+  --mu-src-graph: #8cc79a;
+  --mu-src-metrics: #8b9aa8;
 }

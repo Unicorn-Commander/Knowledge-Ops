@@ -120,6 +120,7 @@ function readTheme() {
     canvasBg: v('--mu-canvas-bg', v('--mu-color-bg', '#05060f')),
     star: v('--mu-canvas-star', '#cfd6ff'),
     edge: v('--mu-canvas-edge', 'rgba(140,150,200,0.22)'),
+    label: v('--mu-canvas-label', '#d9a96c'),
     text: v('--mu-color-text', '#e8eaf6'),
     muted: v('--mu-color-muted', '#9aa0b8'),
     primary: v('--mu-color-primary', '#9b7cf6'),
@@ -139,51 +140,54 @@ function ensureCss() {
   const st = document.createElement('style');
   st.id = 'ko-constellation-css';
   st.textContent = `
-.ko-stage { position: relative; min-height: max(62vh, 460px); height: calc(100vh - 8rem); overflow: hidden; border-radius: var(--mu-radius-lg); background: var(--mu-canvas-bg); }
-.ko-stage--hero { height: calc(100vh - 5.5rem); min-height: 520px; border-radius: 0 0 var(--mu-radius-lg) var(--mu-radius-lg); }
-.ko-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* v2: the canvas lives in the shell's #sky substrate — these styles cover the
+   overlays (hero copy, graph chrome) and the shared tooltip. */
 .ko-canvas--grabbable { cursor: grab; } .ko-canvas--grabbing { cursor: grabbing; }
-.ko-hero { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .75rem; padding: 1.25rem; text-align: center; pointer-events: none; }
-.ko-hero > * { pointer-events: auto; }
-.ko-hero .title { text-shadow: 0 0 calc(28px * var(--mu-glow, .6)) color-mix(in srgb, var(--mu-color-primary) 45%, transparent); }
-.ko-askbar { width: min(680px, calc(100% - 2rem)); margin-top: .5rem; }
-.ko-askbar .row { display: flex; gap: .5rem; align-items: stretch; flex-wrap: wrap; }
-.ko-askbar .input { flex: 1 1 16rem; min-height: 44px; }
-.ko-askbar .select { flex: 0 1 auto; min-height: 44px; }
-.ko-askbar .btn { min-height: 44px; }
-.ko-hint { max-width: 52ch; }
-.ko-status { position: absolute; left: 1rem; bottom: .85rem; right: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; pointer-events: none; font-family: var(--mu-font-mono); font-size: .78rem; color: var(--mu-color-dim); }
-.ko-tooltip { position: absolute; z-index: 4; max-width: 34ch; padding: .35rem .6rem; border-radius: var(--mu-radius-sm); border: 1px solid var(--mu-color-border); background: var(--mu-color-surface-strong); color: var(--mu-color-text); font-family: var(--mu-font-mono); font-size: .78rem; pointer-events: none; transform: translate(-50%, calc(-100% - 12px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ko-chrome { position: absolute; inset: 0; pointer-events: none; display: flex; align-items: stretch; justify-content: space-between; padding: 1rem; gap: 1rem; }
-.ko-toolbar { pointer-events: auto; align-self: flex-start; display: flex; flex-direction: column; gap: .65rem; width: min(300px, 86vw); max-height: calc(100% - 1rem); overflow: auto; }
+.ko-tooltip { position: absolute; z-index: 30; max-width: 34ch; padding: .35rem .65rem; border-radius: var(--mu-radius-sm); background: var(--mu-glass-strong); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 0 0 1px var(--mu-hairline); color: var(--mu-color-text); font-family: var(--mu-font-mono); font-size: .76rem; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* home hero — copy floats directly on the sky, no card, no box */
+.ko-hero2 { position: relative; min-height: calc(100vh - var(--mu-bar-h) - 1.5rem); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; padding: 0 1.2rem 17vh; text-align: center; pointer-events: none; }
+.ko-hero2::before { content: ""; position: absolute; left: 50%; top: 50%; translate: -50% -54%; width: min(66rem, 96vw); height: 24rem; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--mu-color-bg) 62%, transparent) 0%, transparent 74%); pointer-events: none; }
+.ko-hero2 > * { pointer-events: auto; position: relative; }
+.ko-hero2 h1 { font-family: var(--mu-font-display); font-size: var(--mu-type-hero); font-weight: 550; line-height: .98; letter-spacing: -0.022em; margin: .5rem 0 1rem; text-wrap: balance; text-shadow: 0 0 calc(34px * var(--mu-glow, .6)) color-mix(in srgb, var(--mu-color-primary) 40%, transparent); }
+.ko-hero2 .lede { margin: 0 auto; }
+.ko-hero-cta { margin-top: 1.4rem; display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+.ko-hero-cta kbd { font-family: var(--mu-font-mono); font-size: .72em; opacity: .75; margin-left: .35em; }
+.ko-hero-status { position: fixed; left: calc(var(--mu-dock-w) + 1.7rem); right: calc(50% + var(--mu-lens-w) / 2 + 1.2rem); bottom: 1.35rem; z-index: 12; pointer-events: none; font-family: var(--mu-font-mono); font-size: .74rem; font-variant-numeric: tabular-nums; letter-spacing: .05em; color: var(--mu-color-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+html:not([data-route="home"]) .ko-hero-status { display: none; }
+
+/* graph chrome — instrument panels floating over the immersive sky */
+.ko-float { position: fixed; top: calc(var(--mu-bar-h) + 1rem); z-index: 20; display: flex; flex-direction: column; gap: .65rem; width: min(300px, 86vw); max-height: calc(100vh - var(--mu-bar-h) - 3rem); overflow: auto; padding: 1rem 1.1rem 1.15rem; }
+.ko-float--tools { left: calc(var(--mu-dock-w) + 1.6rem); }
+.ko-float--inspector { right: 1.2rem; width: min(370px, 90vw); }
+.ko-float[hidden] { display: none !important; }
 .ko-legend { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .4rem; }
-.ko-legend .pill { position: relative; display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding-inline: .8rem; cursor: pointer; user-select: none; }
+.ko-legend .pill { position: relative; display: inline-flex; align-items: center; gap: .45rem; min-height: 40px; padding-inline: .75rem; cursor: pointer; user-select: none; }
 .ko-legend .pill input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
 .ko-legend .pill:has(input:focus-visible) { outline: 2px solid var(--mu-color-primary); outline-offset: 2px; }
 .ko-legend .pill[data-off="1"] { opacity: .45; }
-.ko-dot { width: .65rem; height: .65rem; border-radius: 50%; flex: none; }
-.ko-edgekey { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; font-family: var(--mu-font-mono); font-size: .75rem; color: var(--mu-color-dim); }
+.ko-dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; box-shadow: 0 0 8px color-mix(in srgb, currentColor 60%, transparent); }
+.ko-edgekey { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; font-family: var(--mu-font-mono); font-size: .72rem; color: var(--mu-color-dim); }
 .ko-edgekey__item { display: inline-flex; align-items: center; gap: .4rem; }
 .ko-edgeline { width: 1.4rem; height: 0; border-top: 1px solid var(--mu-canvas-edge); opacity: .5; flex: none; }
 .ko-edgeline--link { opacity: 1; }
-.ko-linksline { font-family: var(--mu-font-mono); font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--mu-color-muted); margin: 0; }
-.ko-inspector { pointer-events: auto; align-self: flex-start; margin-left: auto; width: min(360px, 90vw); max-height: calc(100% - 1rem); overflow: auto; display: flex; flex-direction: column; gap: .6rem; }
-.ko-inspector[hidden] { display: none; }
-.ko-inspector .ko-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
-.ko-snippet { font-size: .85rem; line-height: 1.5; color: var(--mu-color-muted); max-width: 72ch; overflow-wrap: anywhere; }
+.ko-linksline { font-family: var(--mu-font-mono); font-size: .76rem; font-variant-numeric: tabular-nums; color: var(--mu-color-muted); margin: 0; }
+.ko-float .ko-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.ko-snippet { font-size: .85rem; line-height: 1.55; color: var(--mu-color-muted); overflow-wrap: anywhere; }
 .ko-neighbors { display: flex; flex-direction: column; gap: .25rem; }
 .ko-neighbors button { text-align: left; }
-.ko-inspector .ko-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
-.ko-inspector .ko-close { margin-left: auto; }
+.ko-float .ko-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.ko-float .ko-close { margin-left: auto; }
 .ko-inspector-head { display: flex; align-items: flex-start; gap: .5rem; }
-.ko-searchcount { font-family: var(--mu-font-mono); font-size: .75rem; color: var(--mu-color-dim); min-height: 1.1em; }
-@media (max-width: 760px) {
-  .ko-chrome { flex-direction: column; overflow: auto; }
-  .ko-inspector { margin-left: 0; width: 100%; }
-  .ko-stage { height: calc(100vh - 6rem); }
+.ko-searchcount { font-family: var(--mu-font-mono); font-size: .73rem; color: var(--mu-color-dim); min-height: 1.1em; }
+@media (max-width: 880px) {
+  .ko-float--tools { left: .8rem; right: .8rem; width: auto; max-height: 34vh; }
+  .ko-float--inspector { left: .8rem; right: .8rem; width: auto; top: auto; bottom: 9.2rem; max-height: 38vh; }
+  .ko-hero-status { display: none; }
+  .ko-hero2 { padding-bottom: 22vh; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ko-hero .title { text-shadow: none; }
+  .ko-hero2 h1 { text-shadow: none; }
 }
 `;
   document.head.appendChild(st);
@@ -362,7 +366,7 @@ async function loadConstellation(api) {
 /* the engine — canvas, camera, starfield, ignition choreography            */
 /* ------------------------------------------------------------------------ */
 
-function createEngine(stageEl, canvas, ctx, opts = {}) {
+export function createEngine(stageEl, canvas, ctx, opts = {}) {
   const g2d = canvas.getContext('2d');
   let theme = readTheme();
   let reduced = prefersReducedMotion();
@@ -390,6 +394,32 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
   let focalScreen = { fx: 0.5, fy: 0.42 };
   let hiddenPred = null;     // node -> bool (filters, graph view)
   let framed = false;        // first fit done
+  let grade = 'full';        // 'full' | 'dim' — substrate quality behind panes
+
+  /* Bloom sprites: pre-rendered radial glows per color — real luminosity
+   * without per-node gradient allocation. Cache cleared on theme change. */
+  const spriteCache = new Map();
+  function glowSprite(color) {
+    let s = spriteCache.get(color);
+    if (s) return s;
+    s = document.createElement('canvas');
+    s.width = s.height = 64;
+    const x = s.getContext('2d');
+    let grad = x.createRadialGradient(32, 32, 1.5, 32, 32, 32);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = grad;
+    x.globalAlpha = 0.55;
+    x.fillRect(0, 0, 64, 64);
+    grad = x.createRadialGradient(32, 32, 1, 32, 32, 14);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = grad;
+    x.globalAlpha = 0.9;
+    x.fillRect(0, 0, 64, 64);
+    spriteCache.set(color, s);
+    return s;
+  }
 
   // starfield dust (drawn once per resize/theme)
   let dust = null;
@@ -431,6 +461,7 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
 
   function setTheme() {
     theme = readTheme();
+    spriteCache.clear();
     paintDust();
     dirty = true;
     if (reduced) draw();
@@ -673,8 +704,8 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     if (w < 2 || h < 2) return;
     const now = performance.now();
     g2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g2d.fillStyle = theme.canvasBg;
-    g2d.fillRect(0, 0, w, h);
+    // Transparent canvas: the page's themed nebula gradient shows through.
+    g2d.clearRect(0, 0, w, h);
 
     // dust with gentle parallax
     if (dust) {
@@ -740,6 +771,26 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     }
     g2d.globalAlpha = 1;
 
+    // ---- ambient thought: motes drifting along edges (the org "thinking")
+    if (grade === 'full' && !reduced && theme.glow > 0.2 && !(hover || spot)) {
+      const stride = sim.links.length > 380 ? 3 : 1;
+      g2d.save();
+      for (let i = 0; i < sim.links.length; i += stride) {
+        const l = sim.links[i];
+        if (!visible(l.s) || !visible(l.t)) continue;
+        const ph = hashStr(l.s.id + l.t.id);
+        const t = ((now * 0.000045 * (0.55 + (ph % 7) / 9)) + ph / 9973) % 1;
+        const [x1, y1] = posOf(l.s);
+        const [x2, y2] = posOf(l.t);
+        const mx = x1 + (x2 - x1) * t, my = y1 + (y2 - y1) * t;
+        if (mx < -10 || my < -10 || mx > w + 10 || my > h + 10) continue;
+        g2d.globalAlpha = 0.38 * theme.glow * Math.sin(t * Math.PI);
+        g2d.fillStyle = nodeColor(l.s);
+        g2d.beginPath(); g2d.arc(mx, my, 1.15, 0, TAU2); g2d.fill();
+      }
+      g2d.restore();
+    }
+
     // ---- evidence beams toward the focal point
     if (beams.length && !reduced) {
       const fx = w * focalScreen.fx, fy = h * focalScreen.fy;
@@ -785,6 +836,9 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
       let alpha = n.deco ? 0.5 : 0.95;
       if (dim) alpha *= 0.22;
       const color = nodeColor(n);
+      // Stars have magnitude: a stable per-node brightness class so the field
+      // reads as a sky (varied, luminous), not confetti (uniform, flat).
+      const mag = n.deco ? 0.4 : 0.55 + 0.45 * (((hashStr(n.id) >> 4) % 100) / 100);
 
       if (ig && ig.phase !== 'wait') {
         const flare = ig.phase === 'flare' ? ig.p : 1;
@@ -811,9 +865,17 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
         g2d.restore();
       }
 
-      g2d.globalAlpha = alpha;
+      // bloom halo (sprite blit — cheap) + a small hot core, sized by
+      // magnitude: stars are luminous points, not opaque buttons.
+      if (theme.glow > 0.05 && !n.deco) {
+        const sp = glowSprite(color);
+        const gr = r * (6 + 5 * mag) * (0.4 + theme.glow * 0.6);
+        g2d.globalAlpha = alpha * 0.46 * theme.glow * mag;
+        g2d.drawImage(sp, x - gr, y - gr, gr * 2, gr * 2);
+      }
+      g2d.globalAlpha = alpha * (0.5 + 0.34 * mag);
       g2d.fillStyle = color;
-      g2d.beginPath(); g2d.arc(x, y, r, 0, TAU2); g2d.fill();
+      g2d.beginPath(); g2d.arc(x, y, r * (0.44 + 0.26 * mag), 0, TAU2); g2d.fill();
 
       if (isSel) {
         g2d.globalAlpha = 0.95;
@@ -842,6 +904,46 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
         g2d.globalAlpha = 1;
         g2d.lineWidth = 1;
       }
+    }
+
+    // ---- constellation names: zoomed out, each source cluster gets its
+    // star-chart label — brass small-caps, like an engraved instrument plate.
+    if (grade === 'full' && cam.z < 0.62 && !spot) {
+      const cent = new Map(); // source -> {x,y,c}
+      for (const n of sim.nodes) {
+        if (n.deco || !visible(n)) continue;
+        const c = cent.get(n.source) || { x: 0, y: 0, c: 0 };
+        c.x += n.x; c.y += n.y; c.c++;
+        cent.set(n.source, c);
+      }
+      g2d.save();
+      g2d.font = '500 10px ' + theme.fontMono;
+      try { g2d.letterSpacing = '0.22em'; } catch { /* older engines */ }
+      g2d.textAlign = 'center';
+      g2d.textBaseline = 'middle';
+      for (const [src, c] of cent) {
+        if (c.c < 4) continue;
+        const [x, y] = worldToScreen(c.x / c.c, c.y / c.c);
+        if (x < -60 || y < -30 || x > w + 60 || y > h + 30) continue;
+        const text = (SRC_LABEL[src] || src).toUpperCase();
+        const fade = clamp((0.62 - cam.z) / 0.2, 0, 1);
+        g2d.globalAlpha = 0.28 * fade;
+        g2d.strokeStyle = theme.canvasBg;
+        g2d.lineWidth = 3;
+        g2d.strokeText(text, x, y);
+        g2d.globalAlpha = 0.85 * fade;
+        g2d.fillStyle = theme.label;
+        g2d.fillText(text, x, y);
+        const tw = g2d.measureText(text).width;
+        g2d.globalAlpha = 0.4 * fade;
+        g2d.strokeStyle = theme.label;
+        g2d.lineWidth = 1;
+        g2d.beginPath();
+        g2d.moveTo(x - tw / 2 - 14, y); g2d.lineTo(x - tw / 2 - 5, y);
+        g2d.moveTo(x + tw / 2 + 5, y); g2d.lineTo(x + tw / 2 + 14, y);
+        g2d.stroke();
+      }
+      g2d.restore();
     }
   }
   /* ---- loop ------------------------------------------------------------- */
@@ -901,6 +1003,7 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     screenToWorld,
     visibleOf: visible,
     setHiddenPred(p) { hiddenPred = p; dirty = true; if (reduced) draw(); },
+    setGrade(g) { grade = g; dirty = true; if (reduced) draw(); },
     setHover(n) { if (hover !== n) { hover = n; if (reduced) draw(); } },
     getHover() { return hover; },
     setSelected(n) { selected = n; if (reduced) draw(); },
@@ -945,189 +1048,258 @@ function fillSelect(sel, pairs, value) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* HOME — the hero                                                          */
+/* SKY — the substrate.                                                     */
+/* One engine, owned by the shell, alive on every route. Views talk to it   */
+/* through ctx.sky and bus events:                                          */
+/*   emits  'sky:data' {data, err} · 'sky:node' {node} · 'sky:background'   */
+/*          'sky:ignited' {count, total}                                    */
+/*   modes  hero (home) · immersive (graph: pan/zoom/hover/click)           */
+/*          recede (reading routes — dimmed by CSS, ambience dropped)       */
+/* ------------------------------------------------------------------------ */
+
+export function initSky(hostEl, ctx) {
+  ensureCss();
+  const { api, bus } = ctx;
+
+  const canvas = document.createElement('canvas');
+  hostEl.appendChild(canvas);
+  const tooltip = document.createElement('div');
+  tooltip.className = 'ko-tooltip';
+  tooltip.hidden = true;
+  hostEl.appendChild(tooltip);
+
+  const engine = createEngine(hostEl, canvas, ctx);
+  let mode = 'hero';
+  const sky = { engine, data: null, err: null, get mode() { return mode; }, setMode, refresh };
+
+  function setMode(next) {
+    if (mode === next) return;
+    mode = next;
+    engine.setGrade(next === 'recede' ? 'dim' : 'full');
+    canvas.classList.toggle('ko-canvas--grabbable', next === 'immersive');
+    if (next !== 'immersive') { tooltip.hidden = true; engine.setHover(null); }
+    if (next === 'hero') { engine.setFocal(0.5, 0.44); engine.fitAll(); }
+    if (next === 'immersive') { engine.setFocal(0.5, 0.42); }
+  }
+
+  let refreshing = false;
+  async function refresh() { // background morph (wiki links changed, etc.)
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const g = await api.get('/kb.graph');
+      if (g && Array.isArray(g.nodes) && g.nodes.length) {
+        const data = normalizeGraph(g);
+        engine.morphTo(data);
+        sky.data = data;
+        bus.emit('sky:data', { data, err: null });
+      }
+    } catch { /* keep the current sky */ }
+    finally { refreshing = false; }
+  }
+
+  loadConstellation(api).then(({ data, err }) => {
+    engine.setGraph(data);
+    sky.data = data; sky.err = err;
+    bus.emit('sky:data', { data, err });
+  }).catch((err) => {
+    const data = buildAmbient([], null);
+    engine.setGraph(data);
+    sky.data = data; sky.err = err;
+    bus.emit('sky:data', { data, err });
+  });
+
+  /* ---- pointer: hero = parallax; immersive = pan/zoom/hover/click ------- */
+
+  window.addEventListener('pointermove', (e) => {
+    if (mode !== 'hero') return;
+    engine.pointer.x = e.clientX; engine.pointer.y = e.clientY; engine.pointer.in = true;
+  });
+
+  let dragging = false, dragMoved = false, last = { x: 0, y: 0 };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (mode !== 'immersive') return;
+    dragging = true; dragMoved = false;
+    last = { x: e.clientX, y: e.clientY };
+    canvas.classList.add('ko-canvas--grabbing');
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (mode !== 'immersive') return;
+    const sx = e.clientX, sy = e.clientY; // the host IS the viewport
+    engine.pointer.x = sx; engine.pointer.y = sy; engine.pointer.in = true;
+    if (dragging) {
+      const dx = e.clientX - last.x, dy = e.clientY - last.y;
+      if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+      last = { x: e.clientX, y: e.clientY };
+      engine.cam.x -= dx / engine.cam.z; engine.cam.tx = engine.cam.x;
+      engine.cam.y -= dy / engine.cam.z; engine.cam.ty = engine.cam.y;
+      if (engine.reduced) engine.draw();
+      return;
+    }
+    const hit = engine.hitTest(sx, sy);
+    engine.setHover(hit);
+    if (hit && hit.label) {
+      tooltip.hidden = false;
+      tooltip.textContent = hit.label;
+      const [nx, ny] = engine.worldToScreen(hit.x, hit.y);
+      tooltip.style.left = nx + 'px';
+      tooltip.style.top = ny + 'px';
+      canvas.style.cursor = 'pointer';
+    } else {
+      tooltip.hidden = true;
+      canvas.style.cursor = '';
+    }
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (mode !== 'immersive') { dragging = false; return; }
+    canvas.classList.remove('ko-canvas--grabbing');
+    if (dragging && !dragMoved) {
+      const hit = engine.hitTest(e.clientX, e.clientY);
+      if (hit) bus.emit('sky:node', { node: hit });
+      else bus.emit('sky:background', {});
+    }
+    dragging = false;
+  });
+  canvas.addEventListener('pointerleave', () => {
+    engine.pointer.in = false;
+    if (mode === 'immersive') { engine.setHover(null); tooltip.hidden = true; }
+  });
+  canvas.addEventListener('wheel', (e) => {
+    if (mode !== 'immersive') return;
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0012);
+    engine.cam.tz = clamp(engine.cam.tz * factor, 0.2, 3);
+    if (engine.reduced) { engine.cam.z = engine.cam.tz; engine.draw(); }
+  }, { passive: false });
+
+  /* ---- choreography ----------------------------------------------------- */
+
+  let igniteLift = 0;
+  bus.on('ask:results', ({ passages } = {}) => {
+    const count = engine.ignite(passages || []);
+    // Reading routes dim the sky — lift the veil while the evidence burns.
+    hostEl.classList.add('sky--ignited');
+    clearTimeout(igniteLift);
+    igniteLift = setTimeout(() => hostEl.classList.remove('sky--ignited'), 6500);
+    bus.emit('sky:ignited', { count, total: (passages || []).length });
+  });
+  bus.on('constellation:focus', ({ ids } = {}) => engine.spotlight(ids || []));
+  bus.on('theme', () => engine.setTheme());
+  bus.on('wiki:links-changed', () => { invalidateLinksIndex(); refresh(); });
+
+  engine.setActive(true);
+  return sky;
+}
+
+/* ------------------------------------------------------------------------ */
+/* HOME — copy floating on the living sky. The lens is the ask surface.     */
 /* ------------------------------------------------------------------------ */
 
 export function initHome(sectionEl, ctx) {
   ensureCss();
-  const { api, bus, esc } = ctx;
+  const { bus } = ctx;
 
   sectionEl.innerHTML = `
-    <div class="ko-stage ko-stage--hero">
-      <canvas class="ko-canvas" aria-hidden="true"></canvas>
-      <div class="ko-hero">
-        <span class="kicker">Knowledge-Ops · Constellation</span>
-        <h1 class="title">Watch your organization think.</h1>
-        <p class="lede">Every light is something your organization knows — a doc, a memory, a meeting. Ask, and the evidence lights up.</p>
-        <form class="ko-askbar card card--strong" novalidate>
-          <div class="field">
-            <label class="lbl" for="ko-home-q">Ask your organization anything</label>
-            <div class="row">
-              <input id="ko-home-q" class="input" type="text" name="q" autocomplete="off"
-                     placeholder="Ask your organization anything…" />
-              <select id="ko-home-scope" class="select" aria-label="Search scope"></select>
-              <button class="btn btn--primary" type="submit">Ask</button>
-            </div>
-          </div>
-        </form>
-        <p class="ko-hint dim">Answers cite their sources. Constellation links are related evidence — heuristic, not verification.</p>
+    <div class="ko-hero2">
+      <span class="kicker">Magic Unicorn · The Observatory</span>
+      <h1>Watch your organization think.</h1>
+      <p class="lede">Every light is something your organization knows — a doc, a memory, a meeting, a decision. Ask, and the evidence ignites.</p>
+      <div class="ko-hero-cta">
+        <button type="button" class="btn btn--primary" id="koHeroAsk">Ask the constellation<kbd aria-hidden="true">⌘K</kbd></button>
+        <a class="btn" href="#graph">Enter the graph</a>
       </div>
-      <div class="ko-status" role="status" aria-live="polite"></div>
     </div>
-  `;
+    <p class="ko-hero-status" role="status" aria-live="polite"></p>`;
 
-  const stage = sectionEl.querySelector('.ko-stage');
-  const canvas = sectionEl.querySelector('.ko-canvas');
-  const form = sectionEl.querySelector('form');
-  const input = sectionEl.querySelector('#ko-home-q');
-  const scopeSel = sectionEl.querySelector('#ko-home-scope');
-  const status = sectionEl.querySelector('.ko-status');
-
-  fillSelect(scopeSel, scopeOptions(ctx.me), '');
-
-  const engine = createEngine(stage, canvas, ctx);
-  engine.setFocal(0.5, 0.44);
-
-  // pointer parallax only (home is not pannable — the ask bar owns the stage)
-  stage.addEventListener('pointermove', (e) => {
-    const r = stage.getBoundingClientRect();
-    engine.pointer.x = e.clientX - r.left;
-    engine.pointer.y = e.clientY - r.top;
-    engine.pointer.in = true;
+  const status = sectionEl.querySelector('.ko-hero-status');
+  sectionEl.querySelector('#koHeroAsk').addEventListener('click', () => {
+    if (ctx.lens) ctx.lens.focus();
   });
-  stage.addEventListener('pointerleave', () => { engine.pointer.in = false; });
 
-  status.innerHTML = `<span class="loading"><span class="spinner" aria-hidden="true"></span> Charting the constellation…</span>`;
-
-  loadConstellation(api).then(({ data, err }) => {
-    engine.setGraph(data);
+  const renderStats = () => {
+    const data = ctx.sky && ctx.sky.data;
+    if (!data) {
+      status.innerHTML = `<span class="loading"><span class="spinner" aria-hidden="true"></span> charting the constellation…</span>`;
+      return;
+    }
     const real = data.nodes.filter((n) => !n.deco).length;
-    const srcs = new Set(data.nodes.map((n) => n.source)).size;
+    const srcs = new Set(data.nodes.filter((n) => !n.deco).map((n) => n.source)).size;
+    const links = (data.edges || []).filter((e) => e.kind === 'link').length;
     if (data.kind === 'graph') {
-      status.textContent = `${real.toLocaleString()} points of light · ${srcs} sources`;
+      status.textContent = `${real.toLocaleString()} points of light · ${srcs} sources${links ? ` · ${links} wiki links` : ''}`;
     } else if (data.kind === 'ambient') {
       status.textContent = `${real.toLocaleString()} documents charted · graph service warming up`;
     } else {
-      status.textContent = 'Ambient sky — the constellation will light up once sources connect.';
+      status.textContent = 'ambient sky — the constellation lights up once sources connect';
     }
-    if (err) {
-      const errBox = document.createElement('div');
+    if (ctx.sky && ctx.sky.err) {
+      const errBox = document.createElement('span');
       status.appendChild(errBox);
-      ctx.error(errBox, err);
+      ctx.error(errBox, ctx.sky.err);
     }
-  }).catch((err) => {
-    engine.setGraph(buildAmbient([], null));
-    status.textContent = '';
-    ctx.error(status, err);
-  });
-
-  // Ask: hand off to the ask view; it executes and emits 'ask:results'.
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const query = input.value.trim();
-    if (!query) { input.focus(); return; }
-    bus.emit('ask:run', { query, scope: scopeSel.value || null, k: 8 });
-    location.hash = '#ask';
-  });
-
-  // The jaw-drop: results come back, evidence ignites.
-  bus.on('ask:results', ({ passages } = {}) => {
-    engine.ignite(passages || []);
-    const n = (passages || []).length;
-    status.textContent = n
-      ? `${n} evidence passage${n === 1 ? '' : 's'} lit — related constellation links are heuristic, not verification.`
-      : 'No matching evidence found for that ask.';
-  });
-
-  bus.on('constellation:focus', ({ ids } = {}) => engine.spotlight(ids || []));
-  bus.on('theme', () => engine.setTheme());
-
-  // A doc save changed wiki links: refetch the graph in the background and
-  // morph — existing nodes keep their positions, no full reset.
-  let homeRefreshing = false;
-  bus.on('wiki:links-changed', async () => {
-    invalidateLinksIndex();
-    if (homeRefreshing) return;
-    homeRefreshing = true;
-    try {
-      const g = await api.get('/kb.graph');
-      if (g && Array.isArray(g.nodes) && g.nodes.length) engine.morphTo(normalizeGraph(g));
-    } catch { /* keep the current sky */ }
-    finally { homeRefreshing = false; }
-  });
-
-  // Activity: run only while #home (or empty hash) is the route.
-  const routeCheck = () => {
-    const hash = (location.hash || '#home').replace('#', '');
-    engine.setActive(hash === 'home' || hash === '');
   };
-  window.addEventListener('hashchange', routeCheck);
-  bus.on('nav', () => routeCheck());
-  routeCheck();
+  renderStats();
+  bus.on('sky:data', renderStats);
+  bus.on('sky:ignited', ({ count } = {}) => {
+    status.textContent = count
+      ? `${count} evidence passage${count === 1 ? '' : 's'} lit — constellation links are related evidence, heuristic, not verification`
+      : 'no matching evidence found for that ask';
+  });
 }
 
 /* ------------------------------------------------------------------------ */
-/* GRAPH — same engine, chrome on                                           */
+/* GRAPH — instrument chrome floating over the immersive sky.               */
+/* The canvas + engine belong to ctx.sky; this view is panels only.         */
 /* ------------------------------------------------------------------------ */
 
 export function initGraph(sectionEl, ctx) {
   ensureCss();
   const { api, bus, esc } = ctx;
+  const engine = ctx.sky.engine;
 
   sectionEl.innerHTML = `
-    <div class="ko-stage">
-      <canvas class="ko-canvas ko-canvas--grabbable" aria-hidden="true"></canvas>
-      <div class="ko-chrome">
-        <div class="ko-toolbar card">
-          <span class="kicker">Constellation · Graph</span>
-          <div class="field">
-            <label class="lbl" for="ko-g-search">Find a node</label>
-            <input id="ko-g-search" class="input" type="search" autocomplete="off"
-                   placeholder="Search, Enter cycles matches" />
-            <p class="ko-searchcount" role="status" aria-live="polite"></p>
-          </div>
-          <div class="field">
-            <label class="lbl" for="ko-g-scope">Scope</label>
-            <select id="ko-g-scope" class="select"></select>
-          </div>
-          <fieldset class="ko-legend-wrap field">
-            <legend class="lbl">Sources</legend>
-            <div class="ko-legend"></div>
-          </fieldset>
-          <div class="ko-graph-status" role="status" aria-live="polite"></div>
-        </div>
-        <aside class="ko-inspector card card--strong" hidden aria-live="polite" aria-label="Node inspector"></aside>
+    <div class="ko-float ko-float--tools card--strong">
+      <span class="kicker">Constellation · Graph</span>
+      <div class="field" style="margin:0;">
+        <label class="lbl" for="ko-g-search">Find a node</label>
+        <input id="ko-g-search" class="input" type="search" autocomplete="off"
+               placeholder="Search, Enter cycles matches" />
+        <p class="ko-searchcount" role="status" aria-live="polite"></p>
       </div>
-      <div class="ko-tooltip" hidden aria-hidden="true"></div>
+      <div class="field" style="margin:0;">
+        <label class="lbl" for="ko-g-scope">Scope</label>
+        <select id="ko-g-scope" class="select"></select>
+      </div>
+      <fieldset class="ko-legend-wrap field" style="margin:0; border:0; padding:0;">
+        <legend class="lbl">Sources</legend>
+        <div class="ko-legend"></div>
+      </fieldset>
+      <div class="ko-graph-status" role="status" aria-live="polite"></div>
     </div>
-  `;
+    <aside class="ko-float ko-float--inspector card--strong" hidden aria-live="polite" aria-label="Node inspector"></aside>`;
 
-  const stage = sectionEl.querySelector('.ko-stage');
-  const canvas = sectionEl.querySelector('.ko-canvas');
   const searchInput = sectionEl.querySelector('#ko-g-search');
   const searchCount = sectionEl.querySelector('.ko-searchcount');
   const scopeSel = sectionEl.querySelector('#ko-g-scope');
   const legendEl = sectionEl.querySelector('.ko-legend');
   const statusEl = sectionEl.querySelector('.ko-graph-status');
-  const inspector = sectionEl.querySelector('.ko-inspector');
-  const tooltip = sectionEl.querySelector('.ko-tooltip');
+  const inspector = sectionEl.querySelector('.ko-float--inspector');
 
-  const engine = createEngine(stage, canvas, ctx);
-  engine.setFocal(0.5, 0.4);
+  /* ---- filters (applied only while the graph route is active) ----------- */
 
-  // filter state
   const sourceOff = new Set();
   let scopeFilter = '';
-  engine.setHiddenPred((n) => {
+  const pred = (n) => {
     if (sourceOff.has(n.source)) return true;
     if (scopeFilter && (n.scope || 'global') !== scopeFilter) return true;
     return false;
-  });
+  };
+  const onGraph = () => (location.hash || '').replace('#', '').split('?')[0] === 'graph';
+  const applyPred = () => engine.setHiddenPred(onGraph() ? pred : null);
 
   /* ---- legend + scope chrome ------------------------------------------- */
 
-  // Edge-type key: shown only when the graph actually carries real wiki-link
-  // edges, so the legend never describes something that isn't on the canvas.
   function ensureEdgeKey(edges) {
     const wrap = legendEl.parentElement;
     const existing = wrap.querySelector('.ko-edgekey');
@@ -1143,7 +1315,6 @@ export function initGraph(sectionEl, ctx) {
   }
 
   function buildChrome(data) {
-    // sources present in the data, canonical order first
     const present = [...new Set(data.nodes.map((n) => n.source))];
     present.sort((a, b) => {
       const ia = SRC_ORDER.indexOf(a), ib = SRC_ORDER.indexOf(b);
@@ -1156,18 +1327,19 @@ export function initGraph(sectionEl, ctx) {
       const label = document.createElement('label');
       label.className = 'pill';
       label.innerHTML = `
-        <input type="checkbox" checked />
+        <input type="checkbox" ${sourceOff.has(key) ? '' : 'checked'} />
         <span class="ko-dot" aria-hidden="true"></span>
         <span>${esc(SRC_LABEL[key] || key)}</span>
         <span class="dim">${count.toLocaleString()}</span>`;
       const dot = label.querySelector('.ko-dot');
       dot.style.color = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
       dot.style.background = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
+      label.dataset.off = sourceOff.has(key) ? '1' : '';
       const cb = label.querySelector('input');
       cb.addEventListener('change', () => {
         if (cb.checked) sourceOff.delete(key); else sourceOff.add(key);
         label.dataset.off = cb.checked ? '' : '1';
-        engine.setHiddenPred((n) => sourceOff.has(n.source) || (scopeFilter && (n.scope || 'global') !== scopeFilter));
+        applyPred();
         announce();
       });
       legendEl.appendChild(label);
@@ -1177,12 +1349,12 @@ export function initGraph(sectionEl, ctx) {
     const scopes = [...new Set(data.nodes.map((n) => n.scope || 'global'))].sort();
     const pairs = [['', 'All visible scopes']];
     for (const s of scopes) pairs.push([s, s]);
-    fillSelect(scopeSel, pairs, '');
+    fillSelect(scopeSel, pairs, scopeFilter);
   }
 
   scopeSel.addEventListener('change', () => {
     scopeFilter = scopeSel.value;
-    engine.setHiddenPred((n) => sourceOff.has(n.source) || (scopeFilter && (n.scope || 'global') !== scopeFilter));
+    applyPred();
     announce();
   });
 
@@ -1204,7 +1376,7 @@ export function initGraph(sectionEl, ctx) {
     const key = node.source;
     inspector.innerHTML = `
       <div class="ko-inspector-head">
-        <h2 class="section">${esc(node.label || node.id)}</h2>
+        <h2 class="section section--flush">${esc(node.label || node.id)}</h2>
         <button type="button" class="btn btn--sm ko-close" aria-label="Close inspector">Close</button>
       </div>
       <div class="ko-pills">
@@ -1229,11 +1401,8 @@ export function initGraph(sectionEl, ctx) {
 
     const closeBtn = inspector.querySelector('.ko-close');
     closeBtn.addEventListener('click', closeInspector);
-    // Move focus into the inspector: Escape works after mouse-only canvas
-    // clicks (focus would otherwise sit on <body>) and screen readers land
-    // on labelled context (the panel is aria-live). Exception: when opened by
-    // Enter-cycling from the search input, focus stays there so "Enter cycles
-    // matches" keeps working — Escape still closes via the document handler.
+    // Move focus into the inspector for canvas clicks (Escape + SR context);
+    // keep it in the search box when Enter-cycling matches.
     if (document.activeElement !== searchInput) closeBtn.focus({ preventScroll: true });
     inspector.querySelector('[data-act="library"]').addEventListener('click', () => {
       bus.emit('nav', { view: 'library', ref: node.ref || node.id, path: node.ref || null });
@@ -1304,71 +1473,12 @@ export function initGraph(sectionEl, ctx) {
     }
   }
 
-  /* ---- pointer: hover, tooltip, click, pan, zoom ------------------------ */
+  // Node interactions arrive from the sky.
+  bus.on('sky:node', ({ node } = {}) => { if (onGraph() && node) openInspector(node); });
+  bus.on('sky:background', () => { if (onGraph()) closeInspector(); });
 
-  let dragging = false;
-  let dragMoved = false;
-  let last = { x: 0, y: 0 };
-
-  canvas.addEventListener('pointerdown', (e) => {
-    dragging = true; dragMoved = false;
-    last = { x: e.clientX, y: e.clientY };
-    canvas.classList.add('ko-canvas--grabbing');
-    canvas.setPointerCapture(e.pointerId);
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    const r = stage.getBoundingClientRect();
-    const sx = e.clientX - r.left, sy = e.clientY - r.top;
-    engine.pointer.x = sx; engine.pointer.y = sy; engine.pointer.in = true;
-    if (dragging) {
-      const dx = e.clientX - last.x, dy = e.clientY - last.y;
-      if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
-      last = { x: e.clientX, y: e.clientY };
-      engine.cam.x -= dx / engine.cam.z; engine.cam.tx = engine.cam.x;
-      engine.cam.y -= dy / engine.cam.z; engine.cam.ty = engine.cam.y;
-      if (engine.reduced) engine.draw();
-      return;
-    }
-    const hit = engine.hitTest(sx, sy);
-    engine.setHover(hit);
-    if (hit && hit.label) {
-      tooltip.hidden = false;
-      tooltip.textContent = hit.label;
-      const [nx, ny] = engine.worldToScreen(hit.x, hit.y);
-      tooltip.style.left = nx + 'px';
-      tooltip.style.top = ny + 'px';
-      canvas.style.cursor = 'pointer';
-    } else {
-      tooltip.hidden = true;
-      canvas.style.cursor = '';
-    }
-  });
-  canvas.addEventListener('pointerup', (e) => {
-    canvas.classList.remove('ko-canvas--grabbing');
-    if (dragging && !dragMoved) {
-      const r = stage.getBoundingClientRect();
-      const hit = engine.hitTest(e.clientX - r.left, e.clientY - r.top);
-      if (hit) openInspector(hit);
-      else closeInspector();
-    }
-    dragging = false;
-  });
-  canvas.addEventListener('pointerleave', () => {
-    engine.pointer.in = false;
-    engine.setHover(null);
-    tooltip.hidden = true;
-  });
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const factor = Math.exp(-e.deltaY * 0.0012);
-    engine.cam.tz = clamp(engine.cam.tz * factor, 0.2, 3);
-    if (engine.reduced) { engine.cam.z = engine.cam.tz; engine.draw(); }
-  }, { passive: false });
-
-  // Escape closes the inspector wherever focus sits (canvas clicks leave it
-  // on <body>, outside sectionEl). Document-level, added ONCE at init — the
-  // guards keep it inert unless the graph view and inspector are both
-  // visible, so there is nothing to unbind and no per-open leak.
+  // Escape closes the inspector wherever focus sits. Document-level, added
+  // ONCE at init — guards keep it inert unless graph + inspector are visible.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (sectionEl.hidden || inspector.hidden) return;
@@ -1407,48 +1517,24 @@ export function initGraph(sectionEl, ctx) {
     searchCount.textContent = `${matchIdx + 1} of ${matches.length} — ${n.label}`;
   });
 
-  /* ---- data ------------------------------------------------------------- */
+  /* ---- data (shared engine — chrome rebuilds on sky data) --------------- */
 
   statusEl.innerHTML = `<span class="loading"><span class="spinner" aria-hidden="true"></span> Loading graph…</span>`;
-  loadConstellation(api).then(({ data, err }) => {
-    engine.setGraph(data);
+  const onData = ({ data, err } = {}) => {
+    if (!data) return;
     buildChrome(data);
     announce();
     if (err) { const box = document.createElement('div'); statusEl.appendChild(box); ctx.error(box, err); }
-  }).catch((err) => {
-    engine.setGraph(buildAmbient([], null));
-    buildChrome({ nodes: engine.sim.nodes });
-    statusEl.textContent = '';
-    ctx.error(statusEl, err);
-  });
+  };
+  if (ctx.sky.data) onData({ data: ctx.sky.data, err: ctx.sky.err });
+  bus.on('sky:data', onData);
 
-  /* ---- bus -------------------------------------------------------------- */
-
-  bus.on('constellation:focus', ({ ids } = {}) => engine.spotlight(ids || []));
-  bus.on('ask:results', ({ passages } = {}) => { engine.ignite(passages || []); });
-  bus.on('theme', () => engine.setTheme());
-
-  // A doc save changed wiki links: drop the /kb.links cache, refetch the
-  // graph in the background, and morph in place (positions reused by id).
-  let graphRefreshing = false;
-  bus.on('wiki:links-changed', async () => {
-    invalidateLinksIndex();
-    if (graphRefreshing) return;
-    graphRefreshing = true;
-    try {
-      const g = await api.get('/kb.graph');
-      if (g && Array.isArray(g.nodes) && g.nodes.length) {
-        const data = normalizeGraph(g);
-        engine.morphTo(data);
-        ensureEdgeKey(data.edges);
-        announce();
-      }
-    } catch { /* keep the current sky */ }
-    finally { graphRefreshing = false; }
-  });
+  /* ---- route: filters + inspector live only inside the graph ------------ */
 
   const routeCheck = () => {
-    engine.setActive((location.hash || '').replace('#', '') === 'graph');
+    applyPred();
+    if (!onGraph()) { closeInspector(); engine.clearSpotlight(); }
+    else announce();
   };
   window.addEventListener('hashchange', routeCheck);
   bus.on('nav', () => routeCheck());
