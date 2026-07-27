@@ -1,6 +1,10 @@
 /* Operations view — service metrics (everyone) + admin console
    (refresh jobs/runs, scheduler worker, deletion propagation, audit).
-   Non-admins see ONE locked card for the whole admin area. */
+   Non-admins see ONE locked card for the whole admin area.
+
+   v2 pane idiom: numbers are Fraunces .stat blocks, jobs/runs/audit are
+   hairline instrument tables inside .tablewrap, and every form is a quiet
+   ruled row — no boxed toolbars, no card-in-card. */
 
 const LOADING = `<div class="loading"><span class="spinner"></span> loading…</div>`;
 
@@ -58,27 +62,55 @@ function sparklineSvg(values, w = 240, h = 44) {
   </svg>`;
 }
 
+let stylesInjected = false;
+function injectStyles() {
+  if (stylesInjected) return;
+  stylesInjected = true;
+  const st = document.createElement("style");
+  st.textContent = `
+  /* layout only — every color rides a --mu-* token */
+  #view-ops .ops-quiet { display: flex; gap: .8rem; align-items: flex-end; flex-wrap: wrap; margin: .2rem 0 .4rem; }
+  #view-ops .ops-quiet[hidden] { display: none !important; }
+  #view-ops .ops-quiet .field { margin-bottom: 0; }
+  #view-ops .ops-form { margin: .6rem 0 1.1rem; }
+  #view-ops .ops-form .lbl { display: block; margin-bottom: .35rem; }
+  #view-ops .ops-zone { border-top: 1px solid var(--mu-hairline); margin-top: 1.9rem; padding-top: 1.2rem; }
+  #view-ops .ops-stats { margin: .4rem 0 .4rem; }
+  #view-ops .ops-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  #view-ops .ops-table th {
+    text-align: left; font-family: var(--mu-font-mono); font-size: .66rem;
+    letter-spacing: .11em; text-transform: uppercase; font-weight: 500;
+    color: var(--mu-color-dim); padding: .4rem .8rem .4rem 0; white-space: nowrap;
+  }
+  #view-ops .ops-table td { padding: .5rem .8rem .5rem 0; border-top: 1px solid var(--mu-hairline); vertical-align: baseline; }
+  #view-ops .ops-table td.mono, #view-ops .ops-table .mono { font-size: .8rem; }
+  #view-ops .tablewrap { margin: .3rem 0; }
+  #view-ops .ops-metricrow { display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap; }
+  #view-ops .ops-metricrow[hidden] { display: none !important; }
+  `;
+  document.head.appendChild(st);
+}
+
 export function init(section, ctx) {
   const { api, esc, toast } = ctx;
   const isAdmin = ctx.me ? Boolean(ctx.me.is_admin) : null; // null = unknown, probe at load time
+  injectStyles();
 
   section.innerHTML = `
     <p class="kicker">Service</p>
     <h1 class="title">Operations</h1>
     <p class="lede">Watch the memory machinery: metrics, refresh cadence, deletion propagation, and the audit trail.</p>
 
-    <div class="card card--strong">
-      <div class="row">
-        <div class="field field--grow">
-          <label class="lbl" for="opsMetricName">Metric name</label>
-          <input class="input mono" id="opsMetricName" placeholder="e.g. qwen.orchestrator.plan_seconds" />
-        </div>
-        <button type="button" class="btn btn--primary field-action" id="opsMetricBtn">Render</button>
+    <div class="ops-quiet" role="search" aria-label="Metric explorer">
+      <div class="field field--grow">
+        <label class="lbl" for="opsMetricName">Metric name</label>
+        <input class="input mono" id="opsMetricName" placeholder="e.g. qwen.orchestrator.plan_seconds" />
       </div>
-      <div id="opsMetricResult" aria-live="polite" style="margin-top:1rem;"></div>
+      <button type="button" class="btn btn--primary field-action" id="opsMetricBtn" style="min-height:44px;">Render</button>
     </div>
+    <div id="opsMetricResult" aria-live="polite" style="margin-top:.9rem;"></div>
 
-    <div id="opsAdminArea" style="margin-top:1.4rem;"></div>`;
+    <div id="opsAdminArea" class="ops-zone"></div>`;
 
   const metricBox = section.querySelector("#opsMetricResult");
   const metricInput = section.querySelector("#opsMetricName");
@@ -115,20 +147,23 @@ export function init(section, ctx) {
       const spark = sparklineSvg(metrics.map((m) => m.value));
       const latest = metrics[metrics.length - 1];
       metricBox.innerHTML = `
-        <div class="row" style="align-items:center;gap:1rem;flex-wrap:wrap;">
-          ${spark}
-          <div>
-            <div class="item__title mono" style="font-variant-numeric:tabular-nums;">${esc(Number(latest.value).toFixed(3))}</div>
-            <div class="item__sub">latest · ${metrics.length} points</div>
+        <div class="ops-metricrow">
+          <div class="stat">
+            <span class="stat__n">${esc(Number(latest.value).toFixed(3))}</span>
+            <span class="stat__l">latest · ${metrics.length} points</span>
           </div>
+          ${spark}
         </div>
         <h2 class="section">Recent values</h2>
-        <div class="list">${metrics.slice(-20).reverse().map((m) => `
-          <div class="item">
-            <div><div class="item__title mono" style="font-variant-numeric:tabular-nums;">${esc(Number(m.value).toFixed(3))}</div>
-            <div class="item__sub mono">${esc(JSON.stringify(m.tags || {}))}</div></div>
-            <div class="item__meta dim">${fmtTime(m.recorded_at, esc)}</div>
-          </div>`).join("")}</div>`;
+        <div class="tablewrap"><table class="ops-table">
+          <thead><tr><th>Value</th><th>Tags</th><th>Recorded</th></tr></thead>
+          <tbody>${metrics.slice(-20).reverse().map((m) => `
+            <tr>
+              <td class="mono">${esc(Number(m.value).toFixed(3))}</td>
+              <td class="mono dim">${esc(JSON.stringify(m.tags || {}))}</td>
+              <td class="dim">${fmtTime(m.recorded_at, esc)}</td>
+            </tr>`).join("")}</tbody>
+        </table></div>`;
       mountChart();
     } catch (e) { ctx.error(metricBox, e); }
     finally { metricBtn.disabled = false; }
@@ -138,17 +173,19 @@ export function init(section, ctx) {
 
   /* ---------- admin console ---------- */
   function renderLockedOnce() {
-    const card = document.createElement("div");
-    card.className = "card";
+    const box = document.createElement("div");
     adminArea.innerHTML = "";
-    adminArea.appendChild(card);
-    ctx.locked(card, "the operations console");
+    adminArea.appendChild(box);
+    ctx.locked(box, "the operations console");
   }
 
   if (isAdmin === false) { renderLockedOnce(); return; }
 
   adminArea.innerHTML = `
-    <div class="section-row">
+    <p class="kicker">Machinery</p>
+    <div class="grid grid--3 ops-stats" id="opsStats" aria-live="polite">${LOADING}</div>
+
+    <div class="section-row" style="margin-top:1.4rem;">
       <div>
         <p class="kicker">Refresh</p>
         <h2 class="section section--flush">Jobs and runs</h2>
@@ -163,16 +200,17 @@ export function init(section, ctx) {
       <button type="button" class="btn btn--primary ops-form__action" id="opsJobSave">Save job</button>
     </div>
     <div class="grid grid--2 ops-grid">
-      <div><h3 class="subhead">Jobs</h3><div class="list" id="opsJobs" aria-live="polite">${LOADING}</div></div>
-      <div><h3 class="subhead">Recent runs</h3><div class="list" id="opsRuns" aria-live="polite">${LOADING}</div></div>
+      <div><h3 class="subhead">Jobs</h3><div id="opsJobs" aria-live="polite">${LOADING}</div></div>
+      <div><h3 class="subhead">Recent runs</h3><div id="opsRuns" aria-live="polite">${LOADING}</div></div>
     </div>
-    <div class="grid grid--2 ops-grid">
+    <div class="grid grid--2 ops-grid" style="margin-top:1rem;">
       <div><h3 class="subhead">Scheduler worker</h3><div class="list" id="opsWorker" aria-live="polite">${LOADING}</div></div>
       <div><h3 class="subhead">Deletion propagation</h3><div class="list" id="opsOutbox" aria-live="polite">${LOADING}</div></div>
     </div>
-    <h2 class="section">Recent changes</h2>
-    <div class="list" id="opsAudit" aria-live="polite">${LOADING}</div>`;
+    <h2 class="section">Audit trail</h2>
+    <div id="opsAudit" aria-live="polite">${LOADING}</div>`;
 
+  const statsBox = adminArea.querySelector("#opsStats");
   const jobsBox = adminArea.querySelector("#opsJobs");
   const runsBox = adminArea.querySelector("#opsRuns");
   const workerBox = adminArea.querySelector("#opsWorker");
@@ -189,20 +227,33 @@ export function init(section, ctx) {
 
   const runPill = (status) => `<span class="pill run--${esc(String(status || "unknown"))}">${esc(status || "unknown")}</span>`;
 
+  const stat = (n, label) =>
+    `<div class="stat"><span class="stat__n">${esc(Number(n).toLocaleString())}</span><span class="stat__l">${esc(label)}</span></div>`;
+
   async function loadRefresh() {
     try {
       const data = await api.get("/kb.refresh_jobs");
       const jobs = data.jobs || [], runs = data.runs || [];
-      jobsBox.innerHTML = jobs.length ? jobs.map((job) => `
-        <div class="item">
-          <div><div class="item__title">${esc(job.job_id)}</div><div class="item__sub mono">${esc(job.kind)} · ${esc(job.source_ref)}</div></div>
-          <div class="item__meta"><span class="pill ${job.enabled ? "pill--ok" : "pill--off"}">${job.enabled ? "enabled" : "paused"}</span><span class="pill mono" style="font-variant-numeric:tabular-nums;">${esc(job.interval_seconds)}s</span></div>
-        </div>`).join("") : `<div class="empty">No refresh jobs yet — the machinery is idle by choice, not neglect.</div>`;
-      runsBox.innerHTML = runs.length ? runs.map((run) => `
-        <div class="item">
-          <div><div class="item__title">${esc(run.job_id)}</div><div class="item__sub mono">${esc(run.run_id)}</div></div>
-          <div class="item__meta">${runPill(run.status)}<span class="dim">${fmtTime(run.scheduled_for, esc)}</span></div>
-        </div>`).join("") : `<div class="empty">No runs recorded.</div>`;
+      jobsBox.innerHTML = jobs.length ? `<div class="tablewrap"><table class="ops-table">
+        <thead><tr><th>Job</th><th>Kind · source</th><th>Cadence</th><th>State</th></tr></thead>
+        <tbody>${jobs.map((job) => `
+          <tr>
+            <td class="mono">${esc(job.job_id)}</td>
+            <td class="mono dim">${esc(job.kind)} · ${esc(job.source_ref)}</td>
+            <td class="mono">${esc(job.interval_seconds)}s</td>
+            <td><span class="pill ${job.enabled ? "pill--ok" : "pill--off"}">${job.enabled ? "enabled" : "paused"}</span></td>
+          </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">No refresh jobs yet — the machinery is idle by choice, not neglect.</div>`;
+      runsBox.innerHTML = runs.length ? `<div class="tablewrap"><table class="ops-table">
+        <thead><tr><th>Run</th><th>Job</th><th>Status</th><th>Scheduled</th></tr></thead>
+        <tbody>${runs.map((run) => `
+          <tr>
+            <td class="mono dim">${esc(run.run_id)}</td>
+            <td class="mono">${esc(run.job_id)}</td>
+            <td>${runPill(run.status)}</td>
+            <td class="dim">${fmtTime(run.scheduled_for, esc)}</td>
+          </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">No runs recorded.</div>`;
     } catch (e) { if (!handleAdminError(jobsBox, e)) runsBox.innerHTML = `<div class="empty">—</div>`; }
   }
 
@@ -210,16 +261,29 @@ export function init(section, ctx) {
     try {
       const data = await api.get("/kb.operations");
       const readiness = data.worker || {}, worker = readiness.worker;
+
+      /* machinery at a glance — Fraunces numbers, honest fields only */
+      const refresh = data.refresh || {};
+      const outbox = data.deletion_outbox || {};
+      const stats = [];
+      if (Number.isFinite(Number(refresh.succeeded))) stats.push(stat(refresh.succeeded, "runs succeeded"));
+      if (Number.isFinite(Number(refresh.failed))) stats.push(stat(refresh.failed, "runs failed"));
+      if (Number.isFinite(Number(outbox.pending))) stats.push(stat(outbox.pending, "deletions pending"));
+      if (Number.isFinite(Number(outbox.failed))) stats.push(stat(outbox.failed, "deletions failed"));
+      if (Number.isFinite(Number(outbox.succeeded))) stats.push(stat(outbox.succeeded, "deletions propagated"));
+      if (Number.isFinite(Number(readiness.fresh_running_workers))) stats.push(stat(readiness.fresh_running_workers, "workers active"));
+      statsBox.innerHTML = stats.length ? stats.join("") : `<div class="empty">No operational counters reported.</div>`;
+
       workerBox.innerHTML = worker ? `
         <div class="item">
-          <div><div class="item__title">${esc(worker.worker_kind)}</div><div class="item__sub mono">heartbeat ${fmtTime(worker.heartbeat_at, esc)}</div></div>
+          <div style="min-width:0;"><div class="item__title">${esc(worker.worker_kind)}</div><div class="item__sub">heartbeat ${fmtTime(worker.heartbeat_at, esc)}</div></div>
           <div class="item__meta"><span class="pill ${readiness.ready ? "pill--ok" : "run--failed"}">${readiness.ready ? "ready" : esc(worker.status)}</span><span class="pill">${esc(readiness.fresh_running_workers)} active</span></div>
         </div>` : `<div class="empty">No worker heartbeat recorded.</div>`;
       const tasks = data.deletion_tasks || [];
       outboxBox.innerHTML = tasks.length ? tasks.map((task) => `
         <div class="item">
-          <div><div class="item__title">${esc(task.adapter)}</div><div class="item__sub mono">${esc(task.source_ref)}</div></div>
-          <div class="item__meta">${runPill(task.status)}<span class="dim mono" style="font-variant-numeric:tabular-nums;">${esc(task.attempt_count)}/${esc(task.max_attempts)}</span>${task.status === "failed" ? `<button type="button" class="btn btn--sm ops-redrive" data-id="${esc(task.task_id)}">Retry</button>` : ""}</div>
+          <div style="min-width:0;"><div class="item__title">${esc(task.adapter)}</div><div class="item__sub">${esc(task.source_ref)}</div></div>
+          <div class="item__meta">${runPill(task.status)}<span class="dim mono" style="margin:0 .4rem;">${esc(task.attempt_count)}/${esc(task.max_attempts)}</span>${task.status === "failed" ? `<button type="button" class="btn btn--sm ops-redrive" data-id="${esc(task.task_id)}">Retry</button>` : ""}</div>
         </div>`).join("") : `<div class="empty">No source-owner deletion tasks — every tombstone has propagated.</div>`;
       outboxBox.querySelectorAll(".ops-redrive").forEach((button) => button.addEventListener("click", async () => {
         button.disabled = true;
@@ -230,18 +294,29 @@ export function init(section, ctx) {
           loadAudit();
         } catch (e) { toast("err", e.message); button.disabled = false; }
       }));
-    } catch (e) { if (!handleAdminError(workerBox, e)) outboxBox.innerHTML = `<div class="empty">—</div>`; }
+    } catch (e) {
+      if (!handleAdminError(workerBox, e)) {
+        statsBox.innerHTML = `<div class="empty">—</div>`;
+        outboxBox.innerHTML = `<div class="empty">—</div>`;
+      }
+    }
   }
 
   async function loadAudit() {
     try {
       const data = await api.get("/kb.audit?limit=50");
       const events = data.events || [];
-      auditBox.innerHTML = events.length ? events.map((event) => `
-        <div class="item">
-          <div><div class="item__title">${esc(event.action)}</div><div class="item__sub">${esc(event.actor)} · ${esc(event.resource)}</div></div>
-          <div class="item__meta"><span class="pill ${event.outcome === "success" || event.outcome === "approved" ? "pill--ok" : ""}">${esc(event.outcome)}</span><span class="dim">${fmtTime(event.recorded_at, esc)}</span></div>
-        </div>`).join("") : `<div class="empty">No recorded changes.</div>`;
+      auditBox.innerHTML = events.length ? `<div class="tablewrap"><table class="ops-table">
+        <thead><tr><th>Action</th><th>Actor</th><th>Resource</th><th>Outcome</th><th>When</th></tr></thead>
+        <tbody>${events.map((event) => `
+          <tr>
+            <td class="mono">${esc(event.action)}</td>
+            <td>${esc(event.actor)}</td>
+            <td class="mono dim">${esc(event.resource)}</td>
+            <td><span class="pill ${event.outcome === "success" || event.outcome === "approved" ? "pill--ok" : ""}">${esc(event.outcome)}</span></td>
+            <td class="dim">${fmtTime(event.recorded_at, esc)}</td>
+          </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">No recorded changes.</div>`;
     } catch (e) { handleAdminError(auditBox, e); }
   }
 

@@ -16,22 +16,67 @@ function injectStyles() {
   if (stylesInjected) return;
   stylesInjected = true;
   const css = `
+  /* The pane IS the surface: three zones separated by hairlines, no inner
+     cards. Blanket [hidden] restatement — view CSS authors display on several
+     hidden-able elements (rail sections, tree groups, wanted wrap). */
+  #view-library [hidden] { display: none !important; }
+  /* quiet filter row (section-row supplies the layout) */
+  #view-library .lib-bar { align-items: center; margin: .3rem 0 1.15rem; }
+  #view-library .lib-filter {
+    flex: 1 1 16rem;
+    width: auto;
+    min-height: 44px;
+    padding: .35rem .1rem;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+    border-bottom: 1px solid var(--mu-hairline);
+    transition: border-color var(--mu-dur-quick) ease;
+  }
+  #view-library .lib-filter:hover { border-bottom-color: var(--mu-color-border-strong); }
+  #view-library .lib-filter:focus {
+    background: transparent;
+    box-shadow: none;
+    border-bottom-color: var(--mu-color-primary);
+  }
   #view-library .lib-layout {
     display: grid;
-    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr) minmax(200px, 260px);
-    gap: 1.25rem;
+    grid-template-columns: minmax(220px, 290px) minmax(0, 1fr) minmax(200px, 250px);
     align-items: start;
   }
+  #view-library .lib-list-pane { min-width: 0; padding-right: 1.2rem; }
+  #view-library .lib-reader {
+    min-width: 0;
+    border-left: 1px solid var(--mu-hairline);
+    padding: .1rem 1.5rem 0;
+  }
+  #view-library .lib-rail {
+    position: sticky;
+    top: calc(var(--mu-bar-h) + 1.1rem);
+    border-left: 1px solid var(--mu-hairline);
+    padding-left: 1.2rem;
+  }
+  /* home + editor have no rail: the reading surface takes the full width */
+  #view-library .lib-layout--wide .lib-reader { grid-column: 2 / -1; }
+  #view-library .lib-layout--wide .lib-rail { display: none; }
   @media (max-width: 1100px) {
     #view-library .lib-layout { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); }
-    #view-library .lib-rail { grid-column: 2; }
+    #view-library .lib-rail {
+      grid-column: 2;
+      position: static;
+      border-left: 0;
+      border-top: 1px solid var(--mu-hairline);
+      margin-top: 1.3rem;
+      padding: 1.2rem 0 0 1.5rem;
+    }
   }
   @media (max-width: 760px) {
     #view-library .lib-layout { grid-template-columns: minmax(0, 1fr); }
-    #view-library .lib-rail { grid-column: auto; }
+    #view-library .lib-list-pane { padding-right: 0; }
+    #view-library .lib-reader { border-left: 0; border-top: 1px solid var(--mu-hairline); margin-top: 1rem; padding: 1.2rem 0 0; }
+    #view-library .lib-layout--wide .lib-reader { grid-column: auto; }
+    #view-library .lib-rail { grid-column: auto; padding-left: 0; }
   }
-  #view-library .lib-list-pane { min-width: 0; }
-  #view-library .lib-reader { min-width: 0; }
   #view-library .lib-doc-title {
     font-family: var(--mu-font-display);
     font-size: clamp(1.35rem, 2.6vw, 1.9rem);
@@ -40,40 +85,15 @@ function injectStyles() {
     margin: .25rem 0 .5rem;
     overflow-wrap: break-word;
   }
-  #view-library .lib-md { max-width: 68ch; }
-  #view-library .lib-md h2, #view-library .lib-md h3 {
-    font-family: var(--mu-font-display);
-    color: var(--mu-color-text);
-    scroll-margin-top: 5rem;
+  /* reader body typography flows from base.css .md — only view concerns here */
+  #view-library .lib-md h1, #view-library .lib-md h2, #view-library .lib-md h3 {
+    scroll-margin-top: calc(var(--mu-bar-h) + 1.4rem);
   }
-  #view-library .lib-md table {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: .9em;
-    margin: .8rem 0;
-  }
-  #view-library .lib-md td, #view-library .lib-md th {
-    border: 1px solid var(--mu-color-border);
-    padding: .4rem .6rem;
-    text-align: left;
-  }
+  #view-library .lib-md .lib-dup-title { display: none; }
+  #view-library .lib-md > :first-child,
+  #view-library .lib-md > .lib-dup-title + * { margin-top: .25rem; }
   #view-library .lib-md-scroll { overflow-x: auto; }
-  #view-library .lib-md pre {
-    background: var(--mu-color-surface-strong);
-    border: 1px solid var(--mu-color-border);
-    border-radius: var(--mu-radius-sm);
-    padding: .75rem .9rem;
-    overflow-x: auto;
-    font-family: var(--mu-font-mono);
-    font-size: .85em;
-  }
-  #view-library .lib-md code { font-family: var(--mu-font-mono); }
-  #view-library .lib-md blockquote {
-    border-left: 3px solid var(--mu-color-accent);
-    margin: .8rem 0;
-    padding: .1rem 0 .1rem .9rem;
-    color: var(--mu-color-muted);
-  }
+  #view-library .lib-rule { border: 0; border-top: 1px solid var(--mu-hairline); margin: 1.05rem 0 1.25rem; }
   /* wiki links — resolved links ride the standard accent anchor styling;
      missing pages are red-links: danger at reduced opacity, dotted underline. */
   #view-library a.wl-missing,
@@ -86,36 +106,40 @@ function injectStyles() {
   #view-library button.lib-wanted-btn:hover {
     color: var(--mu-color-danger);
   }
-  /* directory tree */
+  /* directory tree — hairline rows, mono counts right-aligned, the open doc
+     carries the primary tint (same recipe as the dock's active state) */
   #view-library .lib-tree, #view-library .lib-tree ul { list-style: none; margin: 0; padding: 0; }
   #view-library .lib-tree ul.lib-tree-group {
-    margin-left: .55rem;
-    padding-left: .75rem;
-    border-left: 1px solid var(--mu-color-border);
+    margin-left: .5rem;
+    padding-left: .7rem;
+    border-left: 1px solid var(--mu-hairline);
   }
-  #view-library .lib-tree li { margin: .1rem 0; }
+  #view-library .lib-tree li { margin: 0; }
   #view-library .lib-tree-dir, #view-library .lib-tree-doc {
-    display: flex; align-items: center; gap: .45rem;
-    width: 100%; min-height: 44px; padding: .5rem .55rem;
-    border: 1px solid transparent;
-    border-radius: var(--mu-radius-sm);
+    display: flex; align-items: center; gap: .5rem;
+    width: 100%; min-height: 44px; padding: .55rem .55rem;
+    border: 0; border-bottom: 1px solid var(--mu-hairline);
+    border-radius: 0;
     background: transparent;
     color: var(--mu-color-muted);
     font: inherit; font-size: .88rem; text-align: left;
     cursor: pointer;
-    transition: background 140ms cubic-bezier(0.22, 1, 0.36, 1),
-      color 140ms cubic-bezier(0.22, 1, 0.36, 1),
-      border-color 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: background var(--mu-dur-quick) ease, color var(--mu-dur-quick) ease;
   }
+  #view-library .lib-tree > li:last-child > .lib-tree-dir,
+  #view-library .lib-tree > li:last-child > .lib-tree-doc { border-bottom: 0; }
   #view-library .lib-tree-dir:hover, #view-library .lib-tree-doc:hover {
     color: var(--mu-color-text);
-    background: var(--mu-color-surface);
+    background: color-mix(in srgb, var(--mu-color-surface-strong) 60%, transparent);
+    border-radius: var(--mu-radius-sm);
   }
-  #view-library .lib-tree-dir { font-weight: 700; }
+  #view-library .lib-tree-dir { font-weight: 600; }
   #view-library .lib-tree-doc[aria-current="true"] {
-    color: var(--mu-color-text);
-    background: var(--mu-color-surface-strong);
-    border-color: var(--mu-color-border-strong);
+    color: var(--mu-color-primary);
+    background: color-mix(in srgb, var(--mu-color-primary) 13%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mu-color-primary) 30%, transparent);
+    border-radius: var(--mu-radius-sm);
+    border-bottom-color: transparent;
   }
   #view-library .lib-caret {
     flex: none;
@@ -124,13 +148,14 @@ function injectStyles() {
     border-right: 1.5px solid currentColor;
     border-bottom: 1.5px solid currentColor;
     transform: rotate(-45deg);
-    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--mu-dur-quick) var(--mu-ease-settle);
   }
   #view-library .lib-tree-dir[aria-expanded="true"] .lib-caret { transform: rotate(45deg); }
   #view-library .lib-doc-name { min-width: 0; overflow-wrap: anywhere; }
-  #view-library .lib-tree-doc .lib-doc-name { font-weight: 600; }
+  #view-library .lib-tree-doc .lib-doc-name { font-weight: 550; }
   #view-library .lib-count {
     margin-left: auto;
+    flex: none;
     font-size: .72rem;
     color: var(--mu-color-dim);
   }
@@ -152,8 +177,19 @@ function injectStyles() {
   #view-library .lib-crumbs button:hover { text-decoration: underline; text-underline-offset: 3px; }
   #view-library .lib-crumb-sep { color: var(--mu-color-dim); }
   #view-library .lib-crumb-leaf { color: var(--mu-color-dim); padding: .2rem .3rem; overflow-wrap: anywhere; }
-  /* right-rail link lists (backlinks / wanted) */
-  #view-library .lib-links { list-style: none; margin: .4rem 0 0; padding: 0; }
+  /* rail groups: kicker-led, hairline-separated — no plates */
+  #view-library .lib-rail-sec {
+    padding: .1rem 0 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--mu-hairline);
+  }
+  /* rail/inline empties are quiet lines, not dashed boxes */
+  #view-library .lib-rail .empty,
+  #view-library .lib-links .empty {
+    border: 0; text-align: left; font-size: .85rem;
+  }
+  /* compact link lists (backlinks / wanted / orphans) */
+  #view-library .lib-links { list-style: none; margin: .35rem 0 0; padding: 0; }
   #view-library .lib-links button {
     display: block; width: 100%; min-height: 44px;
     text-align: left;
@@ -161,11 +197,14 @@ function injectStyles() {
     border-radius: var(--mu-radius-sm);
     color: var(--mu-color-muted);
     font: inherit; font-size: .85rem;
-    padding: .55rem .6rem;
+    padding: .5rem .4rem;
     cursor: pointer;
     overflow-wrap: anywhere;
   }
-  #view-library .lib-links button:hover { color: var(--mu-color-text); background: var(--mu-color-surface); }
+  #view-library .lib-links button:hover {
+    color: var(--mu-color-text);
+    background: color-mix(in srgb, var(--mu-color-surface-strong) 60%, transparent);
+  }
   #view-library .lib-links button.lib-wanted-btn:hover { color: var(--mu-color-danger); }
   /* editor: side-by-side live preview */
   #view-library .lib-ed-split {
@@ -178,17 +217,27 @@ function injectStyles() {
     #view-library .lib-ed-split { grid-template-columns: minmax(0, 1fr); }
   }
   #view-library .lib-ed-preview {
-    border: 1px solid var(--mu-color-border);
-    border-radius: var(--mu-radius-sm);
-    background: var(--mu-color-bg-elevated);
-    padding: .75rem .95rem;
+    border: 0;
+    border-radius: var(--mu-radius-md);
+    background: var(--mu-color-surface);
+    box-shadow: inset 0 0 0 1px var(--mu-hairline);
+    padding: .75rem 1rem;
     min-height: 320px;
     max-height: 70vh;
     overflow: auto;
   }
-  /* wiki home */
+  /* wiki home: one brass accent for "Start here", the rest is hairline flow */
+  #view-library .lib-start {
+    display: flex; align-items: center; gap: .9rem; flex-wrap: wrap;
+    margin: .35rem 0 .3rem;
+    padding: .7rem 1rem .75rem;
+    border-left: 2px solid var(--mu-brass);
+    border-radius: 0 var(--mu-radius-md) var(--mu-radius-md) 0;
+    background: color-mix(in srgb, var(--mu-brass) 7%, transparent);
+  }
+  #view-library .lib-start .kicker { margin: 0 0 .1rem; }
   #view-library .lib-home-grid {
-    display: grid; gap: 1.25rem;
+    display: grid; gap: 0 2.2rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
@@ -196,7 +245,6 @@ function injectStyles() {
     #view-library .lib-home-grid { grid-template-columns: minmax(0, 1fr); }
   }
   /* TOC + timeline (unchanged vocabulary) */
-  #view-library .lib-rail { position: sticky; top: 1rem; }
   #view-library .lib-toc { list-style: none; margin: .4rem 0 0; padding: 0; }
   #view-library .lib-toc button {
     display: block;
@@ -264,12 +312,13 @@ function injectStyles() {
     border-color: var(--mu-color-primary);
   }
   #view-library .lib-version-banner {
-    border: 1px solid var(--mu-color-warning);
+    border: 0;
     border-radius: var(--mu-radius-md);
     padding: .6rem .9rem;
     margin-bottom: 1rem;
     color: var(--mu-color-text);
-    background: var(--mu-color-surface);
+    background: color-mix(in srgb, var(--mu-color-warning) 8%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mu-color-warning) 32%, transparent);
     display: flex;
     flex-wrap: wrap;
     gap: .6rem;
@@ -379,18 +428,16 @@ export function init(sectionEl, ctx) {
     <span class="kicker">Library</span>
     <h1 class="title">The reading room</h1>
     <p class="lede">Governed documents with lineage — every revision kept, every change recorded, every page linked.</p>
-    <div class="row" style="margin:.75rem 0 1rem; align-items:flex-end; flex-wrap:wrap; gap:.6rem;">
-      <div class="field" style="flex:1; min-width:220px; margin:0;">
-        <label class="lbl" for="libFilter">Filter documents</label>
-        <input class="input" id="libFilter" type="search" placeholder="title or path…" autocomplete="off" />
-      </div>
-      <button class="btn btn--primary" id="libNewBtn" type="button">+ New document</button>
+    <div class="section-row lib-bar">
+      <input class="input lib-filter" id="libFilter" type="search" placeholder="Filter by title or path…"
+             autocomplete="off" aria-label="Filter documents by title or path" />
+      <button class="btn btn--sm" id="libNewBtn" type="button">+ New document</button>
     </div>
     <div class="lib-layout">
       <aside class="lib-list-pane" aria-label="Document tree">
         <div class="list" id="libList" aria-live="polite" aria-busy="false"></div>
       </aside>
-      <main class="lib-reader card" aria-label="Reader">
+      <main class="lib-reader" aria-label="Reader">
         <div id="libReader" aria-live="polite" aria-busy="false"></div>
       </main>
       <aside class="lib-rail" aria-label="Document outline and history">
@@ -402,6 +449,9 @@ export function init(sectionEl, ctx) {
   const readerEl = sectionEl.querySelector("#libReader");
   const railEl = sectionEl.querySelector("#libRail");
   const filterEl = sectionEl.querySelector("#libFilter");
+  const layoutEl = sectionEl.querySelector(".lib-layout");
+  // home + editor render without a rail — let the reading surface span it
+  const setWide = (on) => layoutEl.classList.toggle("lib-layout--wide", !!on);
 
   const state = {
     docs: [],
@@ -512,7 +562,7 @@ export function init(sectionEl, ctx) {
     if (!docs.length) {
       listEl.innerHTML = `<div class="empty">${state.docs.length
         ? "No documents match the filter."
-        : `The library is empty. Start with your first governed doc — a brand bible, a runbook, an eval report.`}</div>`;
+        : `<span class="big">An empty library</span>Start with your first governed doc — a brand bible, a runbook, an eval report.`}</div>`;
       return;
     }
     const root = buildTreeModel(docs);
@@ -706,24 +756,32 @@ export function init(sectionEl, ctx) {
   }
 
   function renderReader(doc, opts = {}) {
+    setWide(false);
     const { versionBanner = "", body = doc.body } = opts;
     const editable = doc.lifecycle_state === "active" || !doc.lifecycle_state;
     const resolveLink = makeResolver(dirOf(doc.path));
     readerEl.innerHTML = `
       ${versionBanner}
       <div class="row" style="justify-content:space-between; align-items:flex-start; gap:.75rem; flex-wrap:wrap;">
-        <div style="min-width:0;">
+        <div style="flex:1; min-width:min(100%, 16rem);">
           ${crumbsHtml(doc.path)}
           <h2 class="lib-doc-title">${esc(doc.title || doc.path || "Untitled")}</h2>
           <div class="row" style="flex-wrap:wrap; gap:.35rem;">${metaPills(doc)}</div>
         </div>
-        <div class="row" style="gap:.4rem;">
+        <div class="row" style="gap:.4rem; flex:none;">
           ${editable && !state.viewingVersion ? '<button class="btn btn--sm" id="libEditBtn" type="button">Edit</button>' : ""}
           ${doc.lifecycle_state !== "tombstoned" && !state.viewingVersion ? '<button class="btn btn--sm" id="libDeleteBtn" type="button">Delete</button>' : ""}
         </div>
       </div>
-      <hr style="border:none; border-top:1px solid var(--mu-color-border); margin:1rem 0;" />
-      <div class="lib-md-scroll"><div class="lib-md" id="libMd">${body != null ? md(body, { resolveLink }) : `<div class="empty">This snapshot's body is not exposed by the backend — metadata only.</div>`}</div></div>`;
+      <hr class="lib-rule" />
+      <div class="lib-md-scroll"><div class="md lib-md" id="libMd">${body != null ? md(body, { resolveLink }) : `<div class="empty">This snapshot's body is not exposed by the backend — metadata only.</div>`}</div></div>`;
+    // Wiki furniture: the title already heads the page — when the body opens
+    // with an identical H1, fold it away (display only; content untouched).
+    const firstEl = readerEl.querySelector("#libMd") && readerEl.querySelector("#libMd").firstElementChild;
+    if (firstEl && firstEl.tagName === "H1" &&
+        firstEl.textContent.trim() === String(doc.title || "").trim()) {
+      firstEl.classList.add("lib-dup-title");
+    }
     const editBtn = readerEl.querySelector("#libEditBtn");
     if (editBtn) editBtn.addEventListener("click", () => renderEditor(doc));
     const delBtn = readerEl.querySelector("#libDeleteBtn");
@@ -772,6 +830,7 @@ export function init(sectionEl, ctx) {
 
   /* ---------- editor (side-by-side live preview) ---------- */
   function renderEditor(doc, extras = {}) {
+    setWide(true);
     const isNew = !doc;
     const d = doc || {
       path: extras.path || "",
@@ -784,25 +843,25 @@ export function init(sectionEl, ctx) {
       <h2 class="section" style="margin-top:0;">${isNew ? "New document" : "Edit document"}</h2>
       <div class="field"><label class="lbl" for="libEdPath">Path</label>
         <input class="input mono" id="libEdPath" value="${esc(d.path)}" placeholder="engineering/title.md" ${isNew ? "" : "readonly"} /></div>
-      <div class="row" style="margin-bottom:.8rem; flex-wrap:wrap; gap:.6rem;">
-        <div class="field" style="margin:0;"><label class="lbl" for="libEdScope">Visibility</label>
+      <div class="row" style="margin-bottom:.8rem; flex-wrap:wrap; gap:.6rem; align-items:flex-start;">
+        <div class="field" style="margin:0; flex:1 1 9rem;"><label class="lbl" for="libEdScope">Visibility</label>
           <select class="select" id="libEdScope">
             <option ${d.scope === "personal" ? "selected" : ""}>personal</option>
             <option ${d.scope === "global" ? "selected" : ""}>global</option>
           </select></div>
         ${isNew ? `
-        <div class="field" style="margin:0;"><label class="lbl" for="libEdValidFrom">Valid from</label>
+        <div class="field" style="margin:0; flex:1 1 11rem;"><label class="lbl" for="libEdValidFrom">Valid from</label>
           <input class="input" id="libEdValidFrom" type="datetime-local" /></div>
-        <div class="field" style="margin:0;"><label class="lbl" for="libEdSupersedes">Supersedes ID</label>
+        <div class="field" style="margin:0; flex:1 1 11rem;"><label class="lbl" for="libEdSupersedes">Supersedes ID</label>
           <input class="input mono" id="libEdSupersedes" /></div>` : ""}
-        <div class="field" style="margin:0;"><label class="lbl" for="libEdReviewDue">Review due</label>
+        <div class="field" style="margin:0; flex:1 1 11rem;"><label class="lbl" for="libEdReviewDue">Review due</label>
           <input class="input" id="libEdReviewDue" type="datetime-local" value="${esc(localDateValue(d.review_due_at))}" /></div>
       </div>
       <div class="lib-ed-split">
         <div class="field" style="margin:0;"><label class="lbl" for="libEdBody">Markdown</label>
           <textarea class="textarea mono" id="libEdBody" style="min-height:320px;">${esc(d.body || "")}</textarea></div>
         <div style="min-width:0;"><span class="lbl" id="libEdPreviewLbl">Preview</span>
-          <div class="lib-md lib-ed-preview" id="libEdPreview" data-preview="1" role="region" aria-labelledby="libEdPreviewLbl"></div></div>
+          <div class="md lib-ed-preview" id="libEdPreview" data-preview="1" role="region" aria-labelledby="libEdPreviewLbl"></div></div>
       </div>
       <div class="row" style="gap:.5rem; margin-top:.85rem;">
         <button class="btn btn--primary" id="libEdSave" type="button">Save</button>
@@ -864,15 +923,15 @@ export function init(sectionEl, ctx) {
   /* ---------- right rail: TOC + timeline + backlinks + ask ---------- */
   async function loadRail(doc) {
     railEl.innerHTML = `
-      <div class="card">
+      <div class="lib-rail-sec">
         <span class="kicker">On this page</span>
         <ul class="lib-toc" id="libToc"><li class="empty" style="padding:.4rem 0;">No headings.</li></ul>
       </div>
-      <div class="card" style="margin-top:1rem;">
+      <div class="lib-rail-sec">
         <span class="kicker">Versions</span>
         <ul class="lib-timeline" id="libTimeline" aria-live="polite"><li class="loading"><span class="spinner"></span> loading…</li></ul>
       </div>
-      <div class="card" id="libLinksCard" style="margin-top:1rem;" aria-live="polite" hidden>
+      <div class="lib-rail-sec" id="libLinksCard" aria-live="polite" hidden>
         <span class="kicker">Linked from · <span id="libBlCount">0</span></span>
         <ul class="lib-links" id="libBacklinks"></ul>
         <div id="libWantedWrap" hidden>
@@ -880,7 +939,7 @@ export function init(sectionEl, ctx) {
           <ul class="lib-links" id="libWanted"></ul>
         </div>
       </div>
-      <button class="btn" id="libAskBtn" type="button" style="margin-top:1rem; width:100%;">Ask about this doc</button>`;
+      <button class="btn" id="libAskBtn" type="button" style="width:100%;">Ask about this doc</button>`;
     railEl.querySelector("#libAskBtn").addEventListener("click", () => {
       const query = `What does "${doc.title || doc.path}" cover, and what decisions does it record?`;
       location.hash = "#ask";
@@ -1038,6 +1097,7 @@ export function init(sectionEl, ctx) {
 
   /* ---------- wiki home (no doc selected) ---------- */
   async function renderHome() {
+    setWide(true);
     state.doc = null;
     state.viewingVersion = null;
     if (state.spy) { state.spy.disconnect(); state.spy = null; }
@@ -1051,36 +1111,31 @@ export function init(sectionEl, ctx) {
     readerEl.innerHTML = `
       <span class="kicker">Wiki home</span>
       <h2 class="lib-doc-title" style="margin-top:.15rem;">Where the reading starts</h2>
-      ${start ? `<div class="card card--strong" style="margin-bottom:1.1rem;">
-          <span class="kicker">Start here</span>
-          <div class="row" style="justify-content:space-between; gap:.75rem; flex-wrap:wrap;">
-            <div style="min-width:0;">
-              <div class="item__title">${esc(start.title || start.path)}</div>
-              <div class="item__sub mono">${esc(start.path)}</div>
-            </div>
-            <button class="btn btn--sm" id="libStartBtn" type="button">Open</button>
+      ${start ? `<div class="lib-start">
+          <div style="flex:1; min-width:min(100%, 14rem);">
+            <span class="kicker">Start here</span>
+            <div class="item__title">${esc(start.title || start.path)}</div>
+            <div class="item__sub mono">${esc(start.path)}</div>
           </div>
+          <button class="btn btn--sm" id="libStartBtn" type="button" style="flex:none;">Open</button>
         </div>` : ""}
-      <div class="lib-home-grid">
-        <section aria-label="Recent changes">
-          <h2 class="section section--flush" style="margin-bottom:.6rem;">Recent changes</h2>
-          <div class="list" id="libRecent">${recent.length ? "" : `<div class="empty">No documents yet — press <strong>+ New document</strong> to add the first.</div>`}</div>
-        </section>
-        <section aria-label="Wanted pages and orphans" id="libHomeLinks">
-          <h2 class="section section--flush" style="margin-bottom:.6rem;">Wanted pages</h2>
-          <div class="loading"><span class="spinner"></span> checking links…</div>
-        </section>
-      </div>`;
+      <section aria-label="Recent changes">
+        <h2 class="section" style="margin:1.5rem 0 .1rem;">Recent changes</h2>
+        <div class="list" id="libRecent">${recent.length ? "" : `<div class="empty"><span class="big">Nothing on the shelves yet</span>Press <strong>+ New document</strong> to add the first governed page.</div>`}</div>
+      </section>
+      <section aria-label="Wanted pages and orphans" id="libHomeLinks">
+        <div class="loading" style="margin-top:1.4rem;"><span class="spinner"></span> checking links…</div>
+      </section>`;
     const recentHost = readerEl.querySelector("#libRecent");
     recent.forEach(d => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "item lib-item-btn";
-      b.innerHTML = `<div style="min-width:0;text-align:left;">
+      b.innerHTML = `<div style="min-width:0; text-align:left;">
           <div class="item__title">${esc(d.title || d.path)}</div>
           <div class="item__sub mono">${esc(d.path || "")}</div>
         </div>
-        <div class="item__meta"><span class="pill">${esc(relTime(d.updated_at))}</span></div>`;
+        <div class="item__meta">${esc(relTime(d.updated_at))}</div>`;
       b.addEventListener("click", () => openDoc(d.id));
       recentHost.appendChild(b);
     });
@@ -1103,16 +1158,22 @@ export function init(sectionEl, ctx) {
       .filter(d => !dstSet.has(d.path) && (!start || d.id !== start.id))
       .slice(0, 12);
     linksHost.innerHTML = `
-      <h2 class="section section--flush" style="margin-bottom:.6rem;">Wanted pages · <span class="mono">${wanted.length}</span></h2>
-      ${wanted.length
-        ? `<ul class="lib-links">${wanted.map(w =>
-            `<li><button type="button" class="lib-wanted-btn" data-target="${esc(w.target)}" data-src="${esc(w.srcs[0] || "")}">${esc(w.target)}${w.srcs.length > 1 ? ` <span class="mono lib-count">×${w.srcs.length}</span>` : ""}</button></li>`).join("")}</ul>`
-        : `<p class="dim" style="margin:.2rem 0 1rem;">No broken wikilinks — every reference resolves.</p>`}
-      <h2 class="section" style="margin:1.2rem 0 .6rem;">Orphans</h2>
-      ${orphans.length
-        ? `<ul class="lib-links">${orphans.map(d =>
-            `<li><button type="button" data-open="${esc(d.path)}" title="${esc(d.path)}">${esc(d.title || d.path)}</button></li>`).join("")}</ul>`
-        : `<p class="dim" style="margin:.2rem 0;">Every page is linked from somewhere.</p>`}`;
+      <div class="lib-home-grid">
+        <div>
+          <h2 class="section" style="margin:1.4rem 0 .1rem;">Wanted pages <span class="pill" style="vertical-align:.18em;">${wanted.length}</span></h2>
+          ${wanted.length
+            ? `<ul class="lib-links">${wanted.map(w =>
+                `<li><button type="button" class="lib-wanted-btn" data-target="${esc(w.target)}" data-src="${esc(w.srcs[0] || "")}">${esc(w.target)}${w.srcs.length > 1 ? ` <span class="mono lib-count">×${w.srcs.length}</span>` : ""}</button></li>`).join("")}</ul>`
+            : `<p class="dim" style="margin:.45rem 0 1rem;">No broken wikilinks — every reference resolves.</p>`}
+        </div>
+        <div>
+          <h2 class="section" style="margin:1.4rem 0 .1rem;">Orphans <span class="pill" style="vertical-align:.18em;">${orphans.length}</span></h2>
+          ${orphans.length
+            ? `<ul class="lib-links">${orphans.map(d =>
+                `<li><button type="button" data-open="${esc(d.path)}" title="${esc(d.path)}">${esc(d.title || d.path)}</button></li>`).join("")}</ul>`
+            : `<p class="dim" style="margin:.45rem 0;">Every page is linked from somewhere.</p>`}
+        </div>
+      </div>`;
     linksHost.querySelectorAll("[data-open]").forEach(b =>
       b.addEventListener("click", () => openDoc(b.dataset.open)));
     linksHost.querySelectorAll(".lib-wanted-btn").forEach(b =>

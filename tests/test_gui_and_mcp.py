@@ -63,7 +63,7 @@ def test_static_files_present_on_disk():
         "ui/api.js",
         "ui/bus.js",
         "ui/theme.js",
-        "ui/palette.js",
+        "ui/lens.js",
         "ui/md.js",
         "ui/constellation.js",
         "ui/vendor/forcesim.js",
@@ -91,12 +91,12 @@ def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     assert "fonts.googleapis.com" not in html and "cdn." not in html
     assert "onclick=" not in html and "onclick=" not in js
     # Eight routed views, eight nav entries.
-    assert html.count('class="side__btn"') == 8
+    assert html.count('class="dock__btn"') == 8
     for view in ("home", "ask", "library", "review", "files", "sources", "graph", "ops"):
         assert f'id="view-{view}"' in html
     # Status dot starts unknown; the shell flips it after probing /ready.
     assert '>Ready<' not in html and '>Checking<' in html
-    assert 'textContent = "Ready"' in js and '"Offline"' in js
+    assert 'textContent = "Live"' in js and '"Offline"' in js
     # Accessibility floor from the design system: 44px targets + focus outlines
     # + reduced-motion handling live in base.css now.
     assert "min-height: 44px" in css

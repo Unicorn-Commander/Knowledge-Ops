@@ -1,14 +1,23 @@
-/* Sources view — the federation as an observatory roster. Status cards
-   grouped by store family, live counts from /kb.stats (count-up on first
-   paint), honest "awaiting population" states, and the registered MCP
-   tool contracts. */
+/* Sources view — the federation as an instrument board. Each store is a
+   plate: glowing source badge, live mono count (count-up on first paint),
+   honest "awaiting population" states, last-sync/detail line. Groups carry
+   brass instrument labels; the MCP tool contracts are hairline rows. */
 
 const LOADING = `<div class="loading"><span class="spinner"></span> loading…</div>`;
 
+/* Map a store key onto the base.css .src--* glow family by COLLECTION, not
+   just prefix, so each qdrant collection keeps its constellation color. */
 function srcClass(source) {
-  const base = String(source || "other").split(":")[0];
-  const known = ["wiki", "falkordb", "qdrant", "file_index", "org_memory", "center_deep", "rest", "postgres"];
-  return "src-" + (known.includes(base) ? base : "other");
+  const s = String(source || "").toLowerCase();
+  const coll = s.startsWith("qdrant:") ? s.slice(7) : s;
+  if (coll.includes("falkor") || coll.includes("graph")) return "src--graph";
+  if (coll.includes("wiki")) return "src--wiki";
+  if (coll.includes("org_memory") || coll.includes("org-memory")) return "src--org-memory";
+  if (coll.includes("meeting")) return "src--meetings";
+  if (coll.includes("stable")) return "src--stable";
+  if (coll.includes("file")) return "src--files";
+  if (coll.includes("metric") || coll.includes("center_deep")) return "src--metrics";
+  return "src-other";
 }
 function sourceLabel(source) {
   return String(source || "other")
@@ -52,9 +61,45 @@ function countUp(node, target) {
   requestAnimationFrame(tick);
 }
 
+function fmtTime(t, esc) {
+  if (!t) return "";
+  try { return new Date(t).toLocaleString(); } catch { return esc(t); }
+}
+
+let stylesInjected = false;
+function injectStyles() {
+  if (stylesInjected) return;
+  stylesInjected = true;
+  const st = document.createElement("style");
+  st.textContent = `
+  /* layout only — every color rides a --mu-* token */
+  #view-sources .src-grouphead { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; margin: 1.8rem 0 .7rem; }
+  #view-sources .src-grouphead[hidden] { display: none !important; }
+  #view-sources .src-grouphead .kicker { margin: 0; }
+  #view-sources .src-grouphead__blurb { font-size: .84rem; }
+  /* instrument readout numerals — mono per the brass-instrument language */
+  #view-sources .stat__n.mono { font-family: var(--mu-font-mono); font-size: 1.65rem; letter-spacing: -.01em; }
+  /* auto-fill keeps lone plates plate-sized instead of stretching the row */
+  #view-sources .grid--3 { grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+  #view-sources .src-plate { display: flex; flex-direction: column; gap: .65rem; }
+  #view-sources .src-plate[hidden] { display: none !important; }
+  #view-sources .src-plate__top { display: flex; align-items: center; justify-content: space-between; gap: .45rem .6rem; flex-wrap: wrap; }
+  #view-sources .src-plate__top .src-badge { font-weight: 550; min-width: 0; flex: 1 1 auto; }
+  #view-sources .src-badge__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #view-sources .src-plate .stat { margin-top: auto; }
+  #view-sources .src-plate .item__meta { margin-left: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #view-sources .tool { display: flex; align-items: baseline; gap: .9rem; }
+  #view-sources .tool[hidden] { display: none !important; }
+  #view-sources .tool > .pill { margin-left: auto; flex: none; }
+  #view-sources .tool__main { min-width: 0; }
+  `;
+  document.head.appendChild(st);
+}
+
 export function init(section, ctx) {
   const { api, esc } = ctx;
   let painted = false;
+  injectStyles();
 
   section.innerHTML = `
     <p class="kicker">Federation</p>
@@ -69,40 +114,49 @@ export function init(section, ctx) {
   const groupsBox = section.querySelector("#srcGroups");
   const toolsBox = section.querySelector("#srcTools");
 
-  function statCard(entry, group, statusMap) {
+  function statusPill(entry, group, status) {
+    const count = Number(entry.count) || 0;
+    if (group && group.id === "graph" && count === 0) {
+      return `<span class="pill pill--off">configured · awaiting population</span>`;
+    }
+    if (status && !status.enabled) {
+      return `<span class="pill pill--off">○ ${esc(status.status)}</span>`;
+    }
+    return `<span class="pill pill--ok">● ${esc(status ? status.status : "reachable")}</span>`;
+  }
+
+  /* one instrument plate per store: badge · count · last-sync/detail */
+  function statPlate(entry, group, statusMap) {
     const label = entry.label || entry.key;
     const status = statusMap.get(String(entry.key)) || statusMap.get(String(label)) || null;
     const count = Number(entry.count) || 0;
-    const isGraph = group.id === "graph";
-    let pill;
-    if (isGraph && count === 0) {
-      pill = `<span class="pill pill--off">configured · awaiting population</span>`;
-    } else if (status && !status.enabled) {
-      pill = `<span class="pill pill--off">○ ${esc(status.status)}</span>`;
-    } else {
-      pill = `<span class="pill pill--ok">● ${esc(status ? status.status : "reachable")}</span>`;
-    }
-    return `<div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;">
-        <span class="src-badge ${srcClass(entry.key)}">${esc(sourceLabel(entry.key))}</span>
-        ${pill}
+    const sync = entry.last_sync || entry.synced_at || entry.last_synced_at
+      || (status && (status.last_sync || status.synced_at)) || null;
+    const foot = sync ? `sync ${fmtTime(sync, esc)}` : ((status && status.detail) || String(entry.key));
+    return `<div class="card src-plate">
+      <div class="src-plate__top">
+        <span class="src-badge ${srcClass(entry.key)}" title="${esc(label)}"><span class="src-badge__t">${esc(label)}</span></span>
+        ${statusPill(entry, group, status)}
       </div>
-      <div style="margin-top:.7rem;">
-        <span class="mono src-count" data-count="${count}" style="font-variant-numeric:tabular-nums;font-size:1.5rem;font-weight:600;">0</span>
-        <span class="dim"> ${esc(entry.unit || group.unit)}</span>
+      <div class="stat">
+        <span class="stat__n mono src-count" data-count="${count}">0</span>
+        <span class="stat__l">${esc(entry.unit || group.unit)}</span>
       </div>
-      <div class="item__sub mono" style="margin-top:.25rem;word-break:break-all;">${esc(label)}</div>
-      ${status && status.detail ? `<div class="dim mono" style="margin-top:.45rem;font-size:.72rem;word-break:break-all;">${esc(status.detail)}</div>` : ""}
+      <div class="item__meta" title="${esc(foot)}">${esc(foot)}</div>
     </div>`;
   }
 
-  function plainCard(s) {
+  /* availability-only plate for sources without a stats entry */
+  function plainPlate(s) {
     const pill = s.enabled
       ? `<span class="pill pill--ok">● ${esc(s.status)}</span>`
       : `<span class="pill pill--off">○ ${esc(s.status)}</span>`;
-    return `<div class="card">
-      <div class="row" style="justify-content:space-between;"><span class="src-badge ${srcClass(s.name)}">${esc(sourceLabel(s.name))}</span>${pill}</div>
-      <div class="dim mono" style="margin-top:.6rem;font-size:.74rem;word-break:break-all;">${esc(s.detail || "")}</div>
+    return `<div class="card src-plate">
+      <div class="src-plate__top">
+        <span class="src-badge ${srcClass(s.name)}" title="${esc(sourceLabel(s.name))}"><span class="src-badge__t">${esc(sourceLabel(s.name))}</span></span>
+        ${pill}
+      </div>
+      <div class="item__meta" title="${esc(s.detail || "")}">${esc(s.detail || "no detail reported")}</div>
     </div>`;
   }
 
@@ -132,18 +186,27 @@ export function init(section, ctx) {
           claimed.add(String(entry.key));
           if (entry.label) claimed.add(String(entry.label));
         });
-        html += `<div class="section-row" style="margin-top:1.1rem;">
-            <div><h2 class="section section--flush">${esc(group.title)}</h2><p class="dim" style="margin:.15rem 0 0;">${esc(group.blurb)}</p></div>
+        html += `<div class="src-grouphead">
+            <span class="kicker">${esc(group.title)}</span>
+            <span class="src-grouphead__blurb dim">${esc(group.blurb)}</span>
           </div>
-          <div class="grid grid--3">${entries.map((entry) => statCard(entry, group, statusMap)).join("")}</div>`;
+          <div class="grid grid--3">${entries.map((entry) => statPlate(entry, group, statusMap)).join("")}</div>`;
       });
       const leftovers = (sources || []).filter((s) => !claimed.has(String(s.name)));
       if (leftovers.length) {
-        html += `<h2 class="section">Other federated sources</h2><div class="grid grid--3">${leftovers.map(plainCard).join("")}</div>`;
+        html += `<div class="src-grouphead">
+            <span class="kicker">Other federated</span>
+            <span class="src-grouphead__blurb dim">Reachable stores without live counts</span>
+          </div>
+          <div class="grid grid--3">${leftovers.map(plainPlate).join("")}</div>`;
       }
     } else {
       /* /kb.stats not deployed yet — fall back to the availability roster. */
-      html = `<h2 class="section section--flush">Federated sources</h2><div class="grid grid--3">${sources.map(plainCard).join("")}</div>`;
+      html = `<div class="src-grouphead">
+          <span class="kicker">Federated sources</span>
+          <span class="src-grouphead__blurb dim">Availability roster — counts unavailable on this host</span>
+        </div>
+        <div class="grid grid--3">${sources.map(plainPlate).join("")}</div>`;
     }
     groupsBox.innerHTML = html;
 
@@ -164,14 +227,13 @@ export function init(section, ctx) {
       const tools = man.tools || [];
       toolsBox.innerHTML = tools.length ? tools.map((t) => `
         <div class="tool">
-          <div>
-            <div><code class="mono">${esc(man.tool_namespace)}.${esc(t.name)}</code>
-              ${t.read_only
-                ? '<span class="pill pill--ok" style="margin-left:.3rem;">read-only</span>'
-                : '<span class="pill" style="margin-left:.3rem;">write</span>'}
-            </div>
+          <div class="tool__main">
+            <code class="mono">${esc(man.tool_namespace)}.${esc(t.name)}</code>
             <div class="dim" style="margin-top:.25rem;font-size:.84rem;">${esc(t.description || "")}</div>
           </div>
+          ${t.read_only
+            ? '<span class="pill pill--ok">read-only</span>'
+            : '<span class="pill">write</span>'}
         </div>`).join("") : `<div class="empty">No tools published in the manifest.</div>`;
     } catch (e) { ctx.error(toolsBox, e); }
   }

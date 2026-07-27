@@ -153,7 +153,7 @@ function ensureCss() {
 .ko-hero2 .lede { margin: 0 auto; }
 .ko-hero-cta { margin-top: 1.4rem; display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; justify-content: center; }
 .ko-hero-cta kbd { font-family: var(--mu-font-mono); font-size: .72em; opacity: .75; margin-left: .35em; }
-.ko-hero-status { position: fixed; left: calc(var(--mu-dock-w) + 1.7rem); right: calc(50% + var(--mu-lens-w) / 2 + 1.2rem); bottom: 1.35rem; z-index: 12; pointer-events: none; font-family: var(--mu-font-mono); font-size: .74rem; font-variant-numeric: tabular-nums; letter-spacing: .05em; color: var(--mu-color-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.ko-hero-status { position: fixed; right: 1.35rem; left: calc(50% + var(--mu-lens-w) / 2 + 1.2rem); bottom: 1.35rem; z-index: 12; pointer-events: none; font-family: var(--mu-font-mono); font-size: .72rem; font-variant-numeric: tabular-nums; letter-spacing: .04em; color: var(--mu-color-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 html:not([data-route="home"]) .ko-hero-status { display: none; }
 
 /* graph chrome — instrument panels floating over the immersive sky */

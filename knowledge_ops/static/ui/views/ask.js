@@ -1,7 +1,19 @@
-/* Ask — the evidence workbench.
-   Federated retrieval (kb.search) and heuristic grounding (kb.ground) rendered
-   as staged citation cards. Honesty first: heuristic verdicts are always
-   labelled as heuristic, never as verification. */
+/* Ask — the evidence workbench, lens-first.
+   The shell's lens is the only place a question is typed; this pane is where
+   the evidence lands. Two states:
+     IDLE   — a quiet welcome: example asks + a pointer at the lens (⌘K).
+     RESULT — the question becomes the pane's Fraunces title; verdict + cited
+              passages render as hairline rows with brass numbering.
+   Honesty first: heuristic verdicts are always labelled as heuristic, never
+   as verification.
+
+   Contracts (KEEP EXACTLY):
+     bus.on('ask:run', {query, scope, k})  — executes an ask (lens, examples,
+                                             constellation node taps).
+     bus.emit('ask:results', {query, passages}) — the sky ignites on this.
+     bus.emit('constellation:focus', {ids}) — spotlight on cite hover/focus.
+     api.post('/kb.ground' | '/kb.search' | '/kb.inspect_citation').
+     ctx.error(el, e) — branches 401 vs 403 (locked). */
 
 const REDUCED = () =>
   window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -20,6 +32,11 @@ function srcToken(source) {
   return "--mu-src-wiki";
 }
 
+/* token → the matching .src--* color class from base.css */
+function srcClass(source) {
+  return "src--" + srcToken(source).slice(9);
+}
+
 function srcLabel(source) {
   const s = String(source || "other");
   if (s.startsWith("qdrant:")) {
@@ -36,6 +53,7 @@ const EXAMPLES = [
   "What is our brand voice?",
   "How does the inference pipeline work?",
   "What is the Majiks launch plan?",
+  "What gates remain before Meeting-Ops launches?",
 ];
 
 const VERDICTS = {
@@ -46,37 +64,69 @@ const VERDICTS = {
   not_enough_evidence: ["pill--off", "not enough evidence"],
 };
 
+const MODES = [
+  ["ground", "Assess"],
+  ["search", "Passages"],
+];
+
+const VALID_SCOPES = ["global", "personal", "all"];
+
 let stylesInjected = false;
 function injectStyles() {
   if (stylesInjected) return;
   stylesInjected = true;
   const st = document.createElement("style");
+  /* Layout/motion only — every color and family rides a --mu-* token or a
+     base.css class. */
   st.textContent = `
-.ask-cite{position:relative;padding:0.9rem 1rem;border:1px solid var(--mu-color-border);border-radius:var(--mu-radius-md);background:var(--mu-color-surface);margin-bottom:0.7rem;transition:border-color 140ms cubic-bezier(0.22,1,0.36,1)}
-.ask-cite:hover,.ask-cite:focus-within{border-color:var(--mu-color-border-strong)}
-.ask-cite--in{opacity:0;transform:translateY(6px);animation:ask-settle 320ms cubic-bezier(0.22,1,0.36,1) forwards}
+/* idle state */
+.ask-try{margin:1.5rem 0 .1rem}
+.ask-ex{min-height:2.75rem}
+.ask-ex .cite__n{flex:none}
+.ask-ex .item__title{font-weight:500}
+.ask-hint{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-top:1.5rem}
+.ask-hint .btn{min-height:2.75rem}
+.ask-kbd{font-family:var(--mu-font-mono);font-size:.68rem;letter-spacing:.06em;color:var(--mu-color-dim);padding:.14rem .48rem;border-radius:var(--mu-radius-pill);box-shadow:inset 0 0 0 1px var(--mu-hairline)}
+/* result header */
+.ask-q{overflow-wrap:anywhere}
+.ask-meta{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.5rem 0 .9rem}
+.ask-meta__pills{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-right:auto}
+.ask-meta .btn{min-height:2.75rem}
+.ask-seg{display:inline-flex;gap:.1rem;padding:.16rem;border-radius:var(--mu-radius-pill);box-shadow:inset 0 0 0 1px var(--mu-hairline)}
+.ask-seg .seg__opt{min-height:2.45rem;padding:.3rem .85rem}
+/* answer + verdict */
+.ask-verdict{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .5rem}
+.ask-answer{max-width:70ch;margin:.2rem 0 .4rem}
+/* citation rows (base .cite hairline vocabulary) */
+.ask-cites .cite:last-child{border-bottom:0}
+.ask-cites .cite{scroll-margin-top:5rem}
+.ask-cites .cite__text{overflow-wrap:anywhere}
+.ask-src{font-family:var(--mu-font-mono);font-size:.72rem;letter-spacing:.05em}
+.ask-score{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:.45rem}
+.ask-score__track{width:3.4rem;height:3px;border-radius:2px;background:var(--mu-color-border);overflow:hidden}
+.ask-score__fill{display:block;height:100%;border-radius:2px;background:var(--mu-gradient-brand)}
+.ask-score__n{font-family:var(--mu-font-mono);font-variant-numeric:tabular-nums;font-size:.74rem;color:var(--mu-color-dim)}
+.ask-cite-foot{display:flex;align-items:center;gap:.6rem;margin-top:.45rem}
+.ask-cite-foot .ask-uri{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ask-cite-foot .btn{flex:none}
+.ask-more[hidden]{display:none!important}
+.ask-uri{font-family:var(--mu-font-mono);font-size:.7rem;color:var(--mu-color-dim);overflow-wrap:anywhere}
+.ask-hint__gram{font-size:.75rem;letter-spacing:.05em}
+/* settle-in (guarded by a REDUCED() check before the class is added) */
+.ask-in{opacity:0;transform:translateY(6px);animation:ask-settle 320ms var(--mu-ease-settle) forwards}
 @keyframes ask-settle{to{opacity:1;transform:none}}
-@media (prefers-reduced-motion: reduce){.ask-cite--in{animation:none;opacity:1;transform:none}}
-.ask-cite__head{display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem}
-.ask-cite__n{display:inline-flex;align-items:center;justify-content:center;min-width:1.6rem;height:1.6rem;padding:0 .3rem;border-radius:var(--mu-radius-sm);font-family:var(--mu-font-mono);font-size:.78rem;color:var(--mu-color-bg);background:var(--mu-color-accent)}
-.ask-cite__title{font-weight:600;color:var(--mu-color-text);min-width:0;overflow-wrap:anywhere}
-.ask-src{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:var(--mu-radius-sm);font-family:var(--mu-font-mono);font-size:.72rem;color:var(--mu-color-text);border:1px solid var(--mu-color-border);background:var(--mu-color-surface-strong)}
-.ask-src__dot{width:.55rem;height:.55rem;border-radius:50%;flex:none}
-.ask-meter{display:flex;align-items:center;gap:.5rem;margin:.55rem 0 .1rem}
-.ask-meter__track{flex:1;max-width:14rem;height:3px;border-radius:2px;background:var(--mu-color-border);overflow:hidden}
-.ask-meter__fill{height:100%;border-radius:2px;background:var(--mu-gradient-brand)}
-.ask-meter__num{font-family:var(--mu-font-mono);font-variant-numeric:tabular-nums;font-size:.75rem;color:var(--mu-color-muted)}
-.ask-cite__text{margin-top:.45rem;color:var(--mu-color-muted);line-height:1.55;overflow-wrap:anywhere}
-.ask-cite__text--clamp{max-height:7.2em;overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 65%,transparent);mask-image:linear-gradient(to bottom,#000 65%,transparent)}
-.ask-cite__foot{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin-top:.55rem}
-.ask-cite__uri{font-family:var(--mu-font-mono);font-size:.7rem;color:var(--mu-color-dim);overflow-wrap:anywhere;margin-top:.45rem}
-.ask-skel{border:1px solid var(--mu-color-border);border-radius:var(--mu-radius-md);background:var(--mu-color-surface);padding:.9rem 1rem;margin-bottom:.7rem}
-.ask-skel__bar{height:.8rem;border-radius:var(--mu-radius-sm);background:linear-gradient(90deg,var(--mu-color-surface-strong) 25%,var(--mu-color-border) 50%,var(--mu-color-surface-strong) 75%);background-size:200% 100%;animation:ask-shimmer 1.4s linear infinite;margin-bottom:.55rem}
+@media (prefers-reduced-motion: reduce){.ask-in{animation:none;opacity:1;transform:none}}
+/* loading skeleton — hairline rows, echoing the cite list to come */
+.ask-skel{padding:.85rem .2rem;border-bottom:1px solid var(--mu-hairline)}
+.ask-skel__bar{height:.72rem;border-radius:var(--mu-radius-sm);background:linear-gradient(90deg,var(--mu-color-surface-strong) 25%,var(--mu-color-border) 50%,var(--mu-color-surface-strong) 75%);background-size:200% 100%;animation:ask-shimmer 1.4s linear infinite;margin-bottom:.5rem}
 .ask-skel__bar:last-child{margin-bottom:0;width:60%}
 @keyframes ask-shimmer{to{background-position:-200% 0}}
 @media (prefers-reduced-motion: reduce){.ask-skel__bar{animation:none;background:var(--mu-color-surface-strong)}}
-.ask-examples{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin-top:.8rem}
-.ask-heading{font-family:var(--mu-font-display);font-size:1.5rem;letter-spacing:.01em;color:var(--mu-color-text);margin:0 0 .8rem}
+/* result-empty example chips */
+.ask-examples{display:flex;flex-wrap:wrap;gap:.6rem;justify-content:center;margin-top:.9rem}
+.ask-examples .btn{min-height:2.75rem}
+/* inspect dialog excerpt */
+.ask-excerpt{white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mu-font-mono);font-size:.82rem;line-height:1.55;background:var(--mu-field-bg);box-shadow:inset 0 0 0 1px var(--mu-hairline);border-radius:var(--mu-radius-md);padding:.9rem;max-height:50vh;overflow:auto;margin:0}
 `;
   document.head.appendChild(st);
 }
@@ -86,53 +136,95 @@ export function init(sectionEl, ctx) {
   injectStyles();
 
   sectionEl.innerHTML = `
-    <div class="card card--strong">
-      <p class="kicker">Evidence workbench</p>
-      <h2 class="ask-heading">Ask knowledge</h2>
-      <div class="field">
-        <label class="lbl" for="askQuery">Question or claim</label>
-        <textarea class="textarea" id="askQuery" rows="3"
-          placeholder="Ask a question, or state a claim to check against the organization's memory…"></textarea>
-      </div>
-      <div class="row" style="align-items:flex-end;">
-        <div>
-          <label class="lbl" for="askMode">Mode</label>
-          <select class="select" id="askMode">
-            <option value="ground" selected>Assess evidence</option>
-            <option value="search">Search (raw passages)</option>
-          </select>
-        </div>
-        <div>
-          <label class="lbl" for="askScope">Visibility</label>
-          <select class="select" id="askScope">
-            <option value="">mine + shared</option>
-            <option value="global">global</option>
-            <option value="personal">personal</option>
-            <option value="all">all (administrator)</option>
-          </select>
-        </div>
-        <div>
-          <label class="lbl" for="askK">Evidence (k)</label>
-          <select class="select" id="askK">
-            <option>4</option><option selected>6</option><option>8</option><option>12</option>
-          </select>
-        </div>
-        <button type="button" class="btn btn--primary" id="askBtn" style="min-height:44px;">Gather evidence</button>
-      </div>
-    </div>
-    <div id="askStage" aria-live="polite" aria-busy="false" style="margin-top:1rem;"></div>
+    <header id="askHead"></header>
+    <div id="askStage" aria-live="polite" aria-busy="false"></div>
   `;
 
-  const $ = (sel) => sectionEl.querySelector(sel);
-  const stage = $("#askStage");
-  const queryEl = $("#askQuery");
-  const modeEl = $("#askMode");
-  const scopeEl = $("#askScope");
-  const kEl = $("#askK");
-  const btn = $("#askBtn");
+  const head = sectionEl.querySelector("#askHead");
+  const stage = sectionEl.querySelector("#askStage");
+
+  /* session state — the lens (or an example / constellation tap) sets these
+     through 'ask:run'; the mode seg re-runs the current query. */
+  let currentQuery = "";
+  let currentScope = null; // null = mine + shared (the API default)
+  let currentK = 8;
+  let currentMode = "ground";
   let runToken = 0;
 
-  /* ---------- rendering ---------- */
+  const normScope = (v) => (VALID_SCOPES.includes(v) ? v : null);
+  const scopeLabel = () => currentScope || "mine+shared";
+
+  function focusLens() {
+    if (ctx.lens && typeof ctx.lens.focus === "function") ctx.lens.focus();
+  }
+
+  /* ---------- idle state ---------- */
+
+  function exampleRow(q, i) {
+    return `<button type="button" class="item ask-ex" data-q="${esc(q)}">
+      <span class="cite__n" aria-hidden="true">${String(i + 1).padStart(2, "0")}</span>
+      <span class="item__title">${esc(q)}</span>
+      <span class="item__meta" aria-hidden="true">→</span>
+    </button>`;
+  }
+
+  function bindExamples(root) {
+    root.querySelectorAll("[data-q]").forEach((b) =>
+      b.addEventListener("click", () =>
+        bus.emit("ask:run", { query: b.dataset.q, scope: null, k: 8 })));
+  }
+
+  function renderIdle() {
+    head.innerHTML = `
+      <p class="kicker">Evidence workbench</p>
+      <h1 class="title">Ask the constellation.</h1>
+      <p class="lede">Answers arrive as cited evidence — heuristic retrieval, never presented as verified fact.</p>`;
+    stage.innerHTML = `
+      <p class="lbl ask-try">Try an ask</p>
+      <div class="list" role="group" aria-label="Example asks">
+        ${EXAMPLES.map(exampleRow).join("")}
+      </div>
+      <div class="ask-hint">
+        <button type="button" class="btn" id="askLensCta">Ask from anywhere <span class="ask-kbd" aria-hidden="true">⌘K</span></button>
+        <span class="dim mono ask-hint__gram" aria-hidden="true">↵ ask · &gt; commands · @ documents</span>
+      </div>`;
+    bindExamples(stage);
+    stage.querySelector("#askLensCta").addEventListener("click", focusLens);
+  }
+
+  /* ---------- result header ---------- */
+
+  function renderRunHead(phase, ms) {
+    let timing = "";
+    if (phase === "running") timing = `<span class="pill pill--off">running…</span>`;
+    else if (phase === "done" && typeof ms === "number") {
+      timing = `<span class="pill">${(ms / 1000).toFixed(2)} s</span>`;
+    }
+    head.innerHTML = `
+      <p class="kicker">Evidence workbench</p>
+      <h1 class="title ask-q">“${esc(currentQuery)}”</h1>
+      <div class="ask-meta">
+        <div class="ask-meta__pills">
+          <span class="pill pill--scope">${esc(scopeLabel())}</span>
+          <span class="pill">k ${esc(String(currentK))}</span>
+          ${timing}
+        </div>
+        <div class="ask-seg" role="group" aria-label="Answer mode">
+          ${MODES.map(([m, label]) => `<button type="button" class="seg__opt" data-mode="${m}"
+            aria-pressed="${String(m === currentMode)}">${label}</button>`).join("")}
+        </div>
+        <button type="button" class="btn" id="askAgain">Ask again <span class="ask-kbd" aria-hidden="true">⌘K</span></button>
+      </div>`;
+    head.querySelectorAll(".ask-seg .seg__opt").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (b.dataset.mode === currentMode) return;
+        currentMode = b.dataset.mode;
+        run({}); // re-run the CURRENT query in the new mode
+      }));
+    head.querySelector("#askAgain").addEventListener("click", focusLens);
+  }
+
+  /* ---------- result rendering ---------- */
 
   function skeletons(n) {
     let html = "";
@@ -143,46 +235,41 @@ export function init(sectionEl, ctx) {
   }
 
   function citeCard(p, i) {
-    const token = srcToken(p.source);
     const score = typeof p.score === "number" ? Math.max(0, Math.min(1, p.score)) : 0;
     const text = String(p.text || "");
-    const long = text.length > 420;
-    const scope = p.scope ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : "";
+    const scope = p.scope && p.scope !== "global"
+      ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : "";
     const relation = p.metadata && p.metadata.evidence_relation
       ? `<span class="pill">${esc(String(p.metadata.evidence_relation).replace(/_/g, " "))}</span>` : "";
-    const uri = p.uri ? `<div class="ask-cite__uri">${esc(p.uri)}</div>` : "";
-    return `<article class="ask-cite" data-i="${i}" tabindex="0"
+    return `<article class="cite" data-i="${i}" tabindex="0"
       data-node-id="${esc(p.ref || p.source_id || "")}">
-      <div class="ask-cite__head">
-        <span class="ask-cite__n" aria-label="citation ${i}">${i}</span>
-        <span class="ask-src"><span class="ask-src__dot" style="background:var(${token});"></span>${esc(srcLabel(p.source))}</span>
-        <span class="ask-cite__title">${esc(p.title || p.source_id || "untitled")}</span>
+      <div class="cite__head">
+        <span class="cite__n" aria-label="citation ${i}">${String(i).padStart(2, "0")}</span>
+        <span class="cite__title">${esc(p.title || p.source_id || "untitled")}</span>
+        <span class="src-badge ${srcClass(p.source)} ask-src">${esc(srcLabel(p.source))}</span>
         ${scope}${relation}
+        <span class="ask-score" role="img" aria-label="relevance score ${esc(fmtScore(p.score))}">
+          <span class="ask-score__track"><span class="ask-score__fill" style="width:${(score * 100).toFixed(0)}%;"></span></span>
+          <span class="ask-score__n">${esc(fmtScore(p.score))}${p.owner ? ` · ${esc(p.owner)}` : ""}</span>
+        </span>
       </div>
-      <div class="ask-meter">
-        <div class="ask-meter__track" role="img" aria-label="relevance score ${esc(fmtScore(p.score))}">
-          <div class="ask-meter__fill" style="width:${(score * 100).toFixed(0)}%;"></div>
-        </div>
-        <span class="ask-meter__num">${esc(fmtScore(p.score))}</span>
-        ${p.owner ? `<span class="ask-meter__num">· ${esc(p.owner)}</span>` : ""}
-      </div>
-      <div class="ask-cite__text ${long ? "ask-cite__text--clamp" : ""}" id="askCiteText${i}">${esc(text) || `<span style="color:var(--mu-color-dim);">(no snippet)</span>`}</div>
-      <div class="ask-cite__foot">
-        ${long ? `<button type="button" class="btn btn--sm ask-more" aria-expanded="false" aria-controls="askCiteText${i}">More</button>` : ""}
-        <button type="button" class="btn btn--sm ask-inspect"
+      <p class="cite__text" id="askCiteText${i}">${esc(text) || `<span class="dim">(no snippet)</span>`}</p>
+      <div class="ask-cite-foot">
+        <span class="ask-uri">${esc(p.uri || "")}</span>
+        <button type="button" class="btn btn--sm ask-more" hidden aria-expanded="false" aria-controls="askCiteText${i}">More</button>
+        <button type="button" class="btn btn--sm cite__inspect ask-inspect"
           data-source="${esc(String(p.source || ""))}"
           data-source-id="${esc(String(p.source_id || ""))}">Inspect span</button>
       </div>
-      ${uri}
     </article>`;
   }
 
   function bindCard(card, query) {
     const more = card.querySelector(".ask-more");
-    if (more) {
+    const textEl = card.querySelector(".cite__text");
+    if (more && textEl) {
       more.addEventListener("click", () => {
-        const t = card.querySelector(".ask-cite__text");
-        const open = t.classList.toggle("ask-cite__text--clamp") === false;
+        const open = textEl.classList.toggle("expanded");
         more.setAttribute("aria-expanded", String(open));
         more.textContent = open ? "Less" : "More";
       });
@@ -200,30 +287,36 @@ export function init(sectionEl, ctx) {
     card.addEventListener("focusout", (e) => { if (!card.contains(e.relatedTarget)) focusOut(); });
   }
 
-  function verdictHeader(data) {
+  /* reveal More only where the 3-line clamp actually hides text */
+  function revealMoreButtons(token) {
+    requestAnimationFrame(() => {
+      if (token !== runToken) return;
+      stage.querySelectorAll(".cite").forEach((card) => {
+        const t = card.querySelector(".cite__text");
+        const more = card.querySelector(".ask-more");
+        if (t && more && t.scrollHeight > t.clientHeight + 1) more.hidden = false;
+      });
+    });
+  }
+
+  function verdictBlock(data) {
     const [cls, label] = VERDICTS[data.verdict] || ["pill--off", "unassessed"];
-    return `<div class="card card--strong" style="margin-bottom:1rem;">
-      <div class="row" style="margin-bottom:.5rem;">
+    return `<div class="ask-verdict">
         <span class="pill ${cls}">${esc(label)}</span>
         <span class="pill pill--off">heuristic, not verified</span>
       </div>
-      <div>${esc(data.answer || "")}</div>
-    </div>`;
+      ${data.answer ? `<p class="answer ask-answer">${esc(data.answer)}</p>` : ""}`;
   }
 
   function emptyState() {
     return `<div class="empty">
-      <p style="margin:0 0 .3rem;">No accessible evidence found for that yet.</p>
-      <p style="margin:0;color:var(--mu-color-dim);">Try one of these to watch the memory answer:</p>
+      <span class="big">Nothing surfaced.</span>
+      <p style="margin:0 0 .3rem;">No accessible evidence answered that yet.</p>
+      <p style="margin:0;" class="dim">Try one of these to watch the memory answer:</p>
       <div class="ask-examples" role="group" aria-label="example questions">
-        ${EXAMPLES.map((q) => `<button type="button" class="btn btn--sm ask-example" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
+        ${EXAMPLES.map((q) => `<button type="button" class="btn btn--sm" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
       </div>
     </div>`;
-  }
-
-  function bindExamples(root) {
-    root.querySelectorAll(".ask-example").forEach((b) =>
-      b.addEventListener("click", () => run({ query: b.dataset.q })));
   }
 
   /* ---------- inspect span dialog ---------- */
@@ -269,16 +362,15 @@ export function init(sectionEl, ctx) {
       const spanPill = Number.isInteger(span.start) && Number.isInteger(span.end)
         ? `<span class="pill">codepoints ${esc(String(span.start))}–${esc(String(span.end))}</span>`
         : "";
-      const token = srcToken(c.source);
       content.innerHTML = `
         <div class="row" style="margin-bottom:.6rem;">
-          <span class="ask-src"><span class="ask-src__dot" style="background:var(${token});"></span>${esc(srcLabel(c.source))}</span>
+          <span class="src-badge ${srcClass(c.source)} ask-src">${esc(srcLabel(c.source))}</span>
           ${spanPill}
           ${c.lifecycle ? `<span class="pill">${esc(c.lifecycle.state)}</span>` : ""}
         </div>
-        <div style="font-family:var(--mu-font-mono);font-size:.78rem;color:var(--mu-color-muted);overflow-wrap:anywhere;margin-bottom:.6rem;">${esc(c.source_path || c.source_id || "")}</div>
-        <pre style="white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--mu-font-mono);font-size:.82rem;line-height:1.55;background:var(--mu-color-surface);border:1px solid var(--mu-color-border);border-radius:var(--mu-radius-md);padding:.9rem;max-height:50vh;overflow:auto;">${highlight(c.excerpt, c.match_ranges)}</pre>
-        <div style="color:var(--mu-color-dim);font-size:.78rem;margin-top:.5rem;">Claim ${esc(String(c.claim_id || ""))} · Citation ${esc(String(c.citation_id || ""))}</div>`;
+        <div class="ask-uri" style="margin:0 0 .6rem;">${esc(c.source_path || c.source_id || "")}</div>
+        <pre class="ask-excerpt source-excerpt">${highlight(c.excerpt, c.match_ranges)}</pre>
+        <div class="dim" style="font-size:.78rem;margin-top:.5rem;">Claim ${esc(String(c.claim_id || ""))} · Citation ${esc(String(c.citation_id || ""))}</div>`;
     } catch (e) {
       error(content, e);
     }
@@ -287,87 +379,75 @@ export function init(sectionEl, ctx) {
   /* ---------- run ---------- */
 
   async function run(opts = {}) {
-    if (opts.query != null) queryEl.value = opts.query;
-    if (opts.scope != null) {
-      const has = Array.from(scopeEl.options).some((o) => o.value === opts.scope);
-      scopeEl.value = has ? opts.scope : "";
+    if (opts.query != null) currentQuery = String(opts.query).trim();
+    if ("scope" in opts) currentScope = normScope(opts.scope);
+    if (opts.k != null) {
+      const kk = parseInt(opts.k, 10);
+      if (Number.isFinite(kk) && kk > 0) currentK = Math.min(kk, 50);
     }
-    if (opts.k != null && Array.from(kEl.options).some((o) => o.value === String(opts.k))) {
-      kEl.value = String(opts.k);
-    }
-    const query = queryEl.value.trim();
-    if (!query) {
-      stage.innerHTML = `<div class="empty">
-        <p style="margin:0 0 .3rem;">State a question or a claim above.</p>
-        <div class="ask-examples" role="group" aria-label="example questions">
-          ${EXAMPLES.map((q) => `<button type="button" class="btn btn--sm ask-example" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
-        </div>
-      </div>`;
-      bindExamples(stage);
-      return;
-    }
+    if (!currentQuery) { renderIdle(); return; }
+
     const token = ++runToken;
-    const mode = modeEl.value;
-    const scope = scopeEl.value || undefined;
-    const k = parseInt(kEl.value, 10) || 6;
-    btn.disabled = true;
+    const query = currentQuery;
+    const mode = currentMode;
     stage.setAttribute("aria-busy", "true");
+    renderRunHead("running");
     stage.innerHTML = `
-      <div class="loading" style="margin-bottom:.8rem;"><span class="spinner"></span> Federating stores, merging &amp; re-ranking evidence…</div>
-      ${skeletons(Math.min(k, 4))}`;
+      <div class="loading" style="margin-bottom:.6rem;"><span class="spinner"></span> Federating stores, merging &amp; re-ranking evidence…</div>
+      ${skeletons(Math.min(currentK, 4))}`;
+    const t0 = performance.now();
     try {
-      const data = await api.post(mode === "search" ? "/kb.search" : "/kb.ground", { query, scope, k });
+      const data = await api.post(mode === "search" ? "/kb.search" : "/kb.ground", {
+        query,
+        scope: currentScope || undefined,
+        k: currentK,
+      });
       if (token !== runToken) return; // superseded
+      renderRunHead("done", performance.now() - t0);
       const passages = data.passages || [];
       let html = "";
       if (mode === "ground") {
-        html += verdictHeader(data);
+        html += verdictBlock(data);
       } else if (data.answer) {
-        html += `<div class="card card--strong" style="margin-bottom:1rem;">${esc(String(data.answer).split(/\n\nCitations:/)[0])}</div>`;
+        html += `<p class="answer ask-answer">${esc(String(data.answer).split(/\n\nCitations:/)[0])}</p>`;
       }
       if (passages.length) {
-        const srcs = [...new Set(passages.map((p) => String(p.source).split(":")[0]))];
-        html += `<h2 class="section">Evidence <span style="color:var(--mu-color-dim);font-weight:400;">· ${passages.length} passage${passages.length === 1 ? "" : "s"} from ${srcs.length} source${srcs.length === 1 ? "" : "s"}</span></h2>`;
-        html += `<div id="askCites">${passages.map((p, i) => citeCard(p, i + 1)).join("")}</div>`;
+        const srcs = [...new Set(passages.map((p) => srcLabel(p.source)))];
+        html += `<h2 class="section">Evidence <span class="dim" style="font-weight:400;">· ${passages.length} passage${passages.length === 1 ? "" : "s"} from ${srcs.length} source${srcs.length === 1 ? "" : "s"}</span></h2>`;
+        html += `<div class="ask-cites" id="askCites">${passages.map((p, i) => citeCard(p, i + 1)).join("")}</div>`;
       } else {
         html += emptyState();
       }
       stage.innerHTML = html;
       bindExamples(stage);
-      const cards = Array.from(stage.querySelectorAll(".ask-cite"));
+      const cards = Array.from(stage.querySelectorAll(".cite"));
       const reduced = REDUCED();
       cards.forEach((card, i) => {
         bindCard(card, query);
         if (!reduced) {
-          card.classList.add("ask-cite--in");
+          card.classList.add("ask-in");
           card.style.animationDelay = (i * 40) + "ms";
         }
       });
+      revealMoreButtons(token);
       bus.emit("ask:results", { query, passages });
     } catch (e) {
       if (token !== runToken) return;
+      renderRunHead("error");
       error(stage, e);
     } finally {
-      if (token === runToken) {
-        btn.disabled = false;
-        stage.setAttribute("aria-busy", "false");
-      }
+      if (token === runToken) stage.setAttribute("aria-busy", "false");
     }
   }
 
-  btn.addEventListener("click", () => run());
-  queryEl.addEventListener("keydown", (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); }
-  });
   bus.on("ask:run", (payload) => run(payload || {}));
 
-  /* initial idle state: invite with example chips */
-  stage.innerHTML = `<div class="empty">
-    <p style="margin:0 0 .3rem;">Ask the organization what it remembers.</p>
-    <p style="margin:0;color:var(--mu-color-dim);">Answers arrive as cited evidence — heuristic retrieval, never presented as verified fact.</p>
-    <div class="ask-examples" role="group" aria-label="example questions">
-      ${EXAMPLES.map((q) => `<button type="button" class="btn btn--sm ask-example" data-q="${esc(q)}">${esc(q)}</button>`).join("")}
-    </div>
-  </div>`;
-  bindExamples(stage);
+  renderIdle();
+
+  /* deep-link: /ui/?ask=…#ask runs the ask on arrival (demos, shared links) */
+  try {
+    const preset = new URLSearchParams(location.search).get("ask");
+    const onAsk = (location.hash || "").replace(/^#/, "").split("?")[0] === "ask";
+    if (preset && preset.trim() && onAsk) run({ query: preset.trim() });
+  } catch { /* no URL API — never blocks boot */ }
 }
