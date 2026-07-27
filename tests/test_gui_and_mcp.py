@@ -38,43 +38,70 @@ def test_ui_static_is_served_on_brand(tmp_path, monkeypatch):
         idx = c.get("/ui/")
         assert idx.status_code == 200
         assert "text/html" in idx.headers["content-type"]
-        assert "Knowledge-Ops" in idx.text and "Review queue" in idx.text and "Ask knowledge" in idx.text
-        css = c.get("/ui/styles.css")
-        assert css.status_code == 200 and "text/css" in css.headers["content-type"]
-        # brand tokens plus mobile/accessibility invariants are present.
-        assert "--mu-gradient-brand" in css.text and "100dvh" in css.text
-        assert "safe-area-inset-bottom" in css.text and "prefers-reduced-motion" in css.text
-        assert c.get("/ui/app.js").status_code == 200
+        # Constellation shell: brand, the module entrypoint, and the ui/ stylesheets.
+        assert "Knowledge-Ops" in idx.text
+        assert 'type="module" src="ui/shell.js"' in idx.text
+        for sheet in ("ui/fonts.css", "ui/tokens.css", "ui/base.css"):
+            assert f'href="{sheet}"' in idx.text
+        tokens = c.get("/ui/ui/tokens.css")
+        assert tokens.status_code == 200 and "text/css" in tokens.headers["content-type"]
+        assert "--mu-gradient-brand" in tokens.text
+        for theme in ("aurora", "daylight", "nebula", "midnight"):
+            assert f'data-theme="{theme}"' in tokens.text
+        base = c.get("/ui/ui/base.css")
+        assert base.status_code == 200
+        assert "prefers-reduced-motion" in base.text and ":focus-visible" in base.text
+        assert c.get("/ui/ui/shell.js").status_code == 200
+        assert c.get("/landing/").status_code == 200
 
 
 def test_static_files_present_on_disk():
-    for name in ("index.html", "styles.css", "app.js"):
+    for name in (
+        "index.html",
+        "landing/index.html",
+        "ui/shell.js",
+        "ui/api.js",
+        "ui/bus.js",
+        "ui/theme.js",
+        "ui/palette.js",
+        "ui/md.js",
+        "ui/constellation.js",
+        "ui/vendor/forcesim.js",
+        "ui/tokens.css",
+        "ui/base.css",
+        "ui/fonts.css",
+        "ui/fonts/fraunces-latin-600.woff2",
+        "ui/views/ask.js",
+        "ui/views/library.js",
+        "ui/views/review.js",
+        "ui/views/files.js",
+        "ui/views/sources.js",
+        "ui/views/ops.js",
+    ):
         assert (STATIC / name).is_file(), f"missing static asset {name}"
 
 
 def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     html = (STATIC / "index.html").read_text()
-    css = (STATIC / "styles.css").read_text()
-    js = (STATIC / "app.js").read_text()
+    css = (STATIC / "ui" / "base.css").read_text()
+    js = (STATIC / "ui" / "shell.js").read_text()
     assert 'class="skip-link"' in html
     assert 'id="mainContent"' in html and 'aria-live="polite"' in html
-    assert "fonts.googleapis.com" not in html
+    # Offline host: no external fonts or CDN references anywhere in the shell.
+    assert "fonts.googleapis.com" not in html and "cdn." not in html
     assert "onclick=" not in html and "onclick=" not in js
-    assert html.count('class="side__btn') == 6
-    assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css
-    assert ".nav__status { font-size: 0; }" not in css
-    mobile_css = css.split("@media (max-width: 860px)", 1)[1]
-    assert "overflow-x: auto" not in mobile_css.split("@media", 1)[0]
+    # Eight routed views, eight nav entries.
+    assert html.count('class="side__btn"') == 8
+    for view in ("home", "ask", "library", "review", "files", "sources", "graph", "ops"):
+        assert f'id="view-{view}"' in html
+    # Status dot starts unknown; the shell flips it after probing /ready.
     assert '>Ready<' not in html and '>Checking<' in html
-    assert 'textContent = "Ready"' in js and 'textContent = "Offline"' in js
-    for control_id in ("askQuery", "wikiFilter", "fileQuery", "fileScope", "metricName"):
-        assert f'for="{control_id}"' in html
-    for control_id in ("edPath", "edBody"):
-        assert f'for="{control_id}"' in js
-    brand_rule = css.split(".brand {", 1)[1].split("}", 1)[0]
-    footer_link_rule = css.split("footer.foot a {", 1)[1].split("}", 1)[0]
-    assert "min-height: 44px" in brand_rule
-    assert "min-height: 44px" in footer_link_rule
+    assert 'textContent = "Ready"' in js and '"Offline"' in js
+    # Accessibility floor from the design system: 44px targets + focus outlines
+    # + reduced-motion handling live in base.css now.
+    assert "min-height: 44px" in css
+    assert ":focus-visible" in css
+    assert "prefers-reduced-motion" in css
 
 
 def test_info_route(tmp_path, monkeypatch):

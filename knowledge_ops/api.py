@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, federation, mcp_http
+from . import __version__, federation, graph_api, mcp_http
 from .authorization import (
     AuthorizationError,
     Principal,
@@ -593,7 +593,14 @@ def kb_openwiki_reject(id: str, req: OpenWikiReviewRequest, principal: ApiPrinci
     return reject_import(id, principal, req.note)
 
 
+# Constellation graph/stats/identity endpoints (kb.graph, kb.stats, kb.me).
+app.include_router(graph_api.router)
+
+
 # Web GUI — served by this app itself (no build step, no CDN). Mounted last so it
 # never shadows the API routes above. `html=True` serves index.html at /ui/.
 if _STATIC_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
+_LANDING_DIR = _STATIC_DIR / "landing"
+if _LANDING_DIR.is_dir():
+    app.mount("/landing", StaticFiles(directory=str(_LANDING_DIR), html=True), name="landing")

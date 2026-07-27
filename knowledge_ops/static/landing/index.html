@@ -1,0 +1,768 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Knowledge-Ops — Watch your organization think</title>
+<meta name="description" content="Knowledge-Ops is governed memory for your organization — every answer grounded in evidence you can inspect, scoped to who's allowed to see it. By Magic Unicorn.">
+<meta property="og:title" content="Knowledge-Ops — Watch your organization think">
+<meta property="og:description" content="Governed organizational memory. Every answer grounded in evidence you can inspect, scoped to who's allowed to see it.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Magic Unicorn Knowledge-Ops">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#08071a">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f1e7">
+<!-- Vendored Fraunces, served same-origin by the console's static mount
+     (static root is at /ui/, the ui assets live in its ui/ subdir). -->
+<link rel="stylesheet" href="/ui/ui/fonts.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23b487ff'/%3E%3Ccircle cx='26' cy='8' r='2.2' fill='%23ff9ed8'/%3E%3Ccircle cx='6' cy='24' r='2.2' fill='%235eead4'/%3E%3Cpath d='M16 16 26 8M16 16 6 24' stroke='%23b487ff' stroke-opacity='.45' stroke-width='1'/%3E%3C/svg%3E">
+
+<style>
+/* ---------------------------------------------------------------- tokens */
+:root {
+  /* AURORA — deep-space observatory (default) */
+  --bg: #08071a;
+  --bg-elevated: #0d0b26;
+  --surface: rgba(236, 234, 248, 0.035);
+  --surface-strong: rgba(236, 234, 248, 0.065);
+  --border: rgba(155, 124, 246, 0.16);
+  --border-strong: rgba(155, 124, 246, 0.34);
+  --text: #eceaf8;
+  --muted: #aca7c9;
+  --dim: #8a85a8;
+  --primary: #9b7cf6;
+  --accent: #46c2b3;
+  --warning: #e7b75f;
+  --grad-brand: linear-gradient(100deg, #b7a0ff 0%, #9b7cf6 38%, #46c2b3 100%);
+  --glow-hero: 0 0 90px rgba(155, 124, 246, 0.35);
+  /* Source identity — MUST match the console's --mu-src-* hues (dark family) */
+  --src-wiki: #b487ff;
+  --src-memory: #ff9ed8;
+  --src-meetings: #5eead4;
+  --src-docs: #8ab8ff;
+  --canvas-star: #cfc8f0;
+  --canvas-edge: 155, 124, 246;      /* rgb triplet, alpha applied in JS */
+  --font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --container: 68rem;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* DAYLIGHT — warm paper, ink and gold engraving */
+    --bg: #f6f1e7;
+    --bg-elevated: #efe9db;
+    --surface: rgba(255, 253, 248, 0.72);
+    --surface-strong: #fffdf8;
+    --border: rgba(41, 34, 68, 0.15);
+    --border-strong: rgba(41, 34, 68, 0.32);
+    --text: #241f3a;
+    --muted: #575170;
+    --dim: #6b6582;
+    --primary: #6444d4;
+    --accent: #157c70;
+    --warning: #8a5f0e;
+    --grad-brand: linear-gradient(100deg, #6444d4 0%, #5e3fc9 45%, #157c70 100%);
+    --glow-hero: 0 0 90px rgba(100, 68, 212, 0.12);
+    /* Source identity — MUST match the console's --mu-src-* hues (daylight family) */
+    --src-wiki: #6d28d9;
+    --src-memory: #a8336f;
+    --src-meetings: #0f766e;
+    --src-docs: #1d4ed8;
+    --canvas-star: #2a2440;
+    --canvas-edge: 146, 110, 42;     /* gold hairlines */
+  }
+}
+
+/* ---------------------------------------------------------------- reset */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  overflow-x: hidden;
+}
+img, svg, canvas { max-width: 100%; display: block; }
+a { color: var(--primary); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.skip-link {
+  position: absolute; left: 1rem; top: -4rem; z-index: 100;
+  background: var(--surface-strong); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 0.7rem 1.1rem; transition: top 120ms ease;
+}
+.skip-link:focus-visible { top: 1rem; }
+
+/* ---------------------------------------------------------------- shared */
+.wrap { max-width: var(--container); margin: 0 auto; padding: 0 clamp(1.25rem, 4vw, 2.5rem); }
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h2.section-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(1.7rem, 3.4vw, 2.4rem);
+  line-height: 1.18;
+  letter-spacing: -0.01em;
+  margin: 0.6rem 0 1rem;
+  max-width: 26ch;
+}
+.section-lede { color: var(--muted); max-width: 62ch; }
+section { padding: clamp(4rem, 9vh, 6.5rem) 0; }
+section + section { border-top: 1px solid var(--border); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: clamp(1.25rem, 3vw, 1.75rem);
+}
+.card--strong { background: var(--surface-strong); border-color: var(--border-strong); }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 0.45em;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.02em;
+  padding: 0.3em 0.85em; border-radius: 999px;
+  border: 1px solid var(--border-strong); color: var(--muted);
+  background: var(--surface);
+}
+.pill--honesty { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+
+.mono { font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------- header */
+.top {
+  position: absolute; inset: 0 0 auto 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: var(--container); margin: 0 auto;
+  padding: 1.25rem clamp(1.25rem, 4vw, 2.5rem);
+}
+.wordmark {
+  display: inline-flex; align-items: center; gap: 0.6rem;
+  font-family: var(--font-mono); font-size: 0.85rem; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text); text-decoration: none;
+  min-height: 44px;
+}
+.wordmark svg { width: 20px; height: 20px; flex: none; }
+.top-console {
+  display: inline-flex; align-items: center; min-height: 44px;
+  font-family: var(--font-mono); font-size: 0.8rem;
+  color: var(--muted); text-decoration: none; padding: 0 0.25rem;
+}
+.top-console:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------- hero */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  padding: 0;
+}
+#sky {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  z-index: 0;
+}
+.hero-nebula {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background:
+    radial-gradient(42rem 30rem at 30% 38%, color-mix(in srgb, var(--primary) 13%, transparent), transparent 70%),
+    radial-gradient(36rem 26rem at 72% 60%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%);
+}
+.hero-inner {
+  position: relative; z-index: 2;
+  text-align: center;
+  padding: 7rem 1.5rem 5rem;
+  max-width: 54rem;
+}
+.hero h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(2.7rem, 8vw, 5.2rem);
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  margin: 1.1rem 0 1.4rem;
+  text-wrap: balance;
+}
+.hero h1 .think {
+  font-style: italic;
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero .lede {
+  color: var(--muted);
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  max-width: 46ch;
+  margin: 0 auto 2.2rem;
+  text-wrap: pretty;
+}
+.cta-row {
+  display: flex; gap: 0.9rem; justify-content: center; flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 48px; padding: 0 1.6rem;
+  border-radius: 999px; border: 1px solid var(--border-strong);
+  font: 600 0.95rem/1 var(--font-sans);
+  text-decoration: none; color: var(--text);
+  background: var(--surface);
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+.btn:hover { border-color: var(--accent); }
+.btn--primary {
+  background: var(--grad-brand);
+  border: none;
+  color: #0a0920;
+  box-shadow: var(--glow-hero);
+}
+@media (prefers-color-scheme: light) {
+  .btn--primary { color: #fffdf8; }
+}
+.btn--primary:hover { transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) {
+  .btn, .btn--primary:hover { transition: none; transform: none; }
+}
+.hero-stats {
+  margin-top: 3.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+}
+.hero-stats b { color: var(--muted); font-weight: 600; }
+.hero-stats .sep { margin: 0 0.5em; opacity: 0.5; }
+
+/* ------------------------------------------------------- section: evidence */
+.split {
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: clamp(2rem, 5vw, 4rem); align-items: start;
+}
+@media (max-width: 56rem) { .split { grid-template-columns: 1fr; } }
+
+.ask-card { font-size: 0.95rem; }
+.ask-query {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  font-family: var(--font-mono); font-size: 0.9rem;
+  padding-bottom: 0.9rem; margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.ask-query .q::before { content: "› "; color: var(--accent); }
+.ask-answer { color: var(--text); max-width: 60ch; }
+.ask-answer p + p { margin-top: 0.7rem; }
+.cite {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+  min-width: 1.5em; padding: 0.1em 0.4em; margin: 0 0.15em;
+  border-radius: 5px; vertical-align: 0.25em;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  border: 1px solid var(--border-strong);
+  color: var(--primary);
+}
+.evidence-list { list-style: none; margin-top: 1.1rem; display: grid; gap: 0.5rem; }
+.evidence-list li {
+  display: flex; align-items: baseline; gap: 0.7rem;
+  font-family: var(--font-mono); font-size: 0.76rem; color: var(--muted);
+  padding: 0.55rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.evidence-list .src-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center;
+}
+.evidence-list .ttl { color: var(--text); }
+.evidence-list .score { margin-left: auto; color: var(--dim); }
+.ask-honesty {
+  display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+  margin-top: 1.1rem; padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+}
+.ask-honesty small { color: var(--dim); font-size: 0.78rem; max-width: 40ch; }
+
+.feature-points { list-style: none; margin-top: 1.4rem; display: grid; gap: 0.9rem; }
+.feature-points li { padding-left: 1.4rem; position: relative; color: var(--muted); }
+.feature-points li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+}
+.feature-points b { color: var(--text); font-weight: 600; }
+
+/* -------------------------------------------------------- section: sources */
+.source-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem; margin-top: 2.2rem;
+}
+@media (max-width: 56rem) { .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 30rem) { .source-grid { grid-template-columns: 1fr; } }
+.source-card { border-top: 3px solid var(--src, var(--primary)); }
+.source-card .count {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.7rem);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.source-card .src-name {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 0.7rem;
+}
+.source-card .src-name::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--src, var(--primary));
+}
+.source-card p { color: var(--muted); font-size: 0.88rem; margin-top: 0.5rem; }
+.sources-tail { margin-top: 1.6rem; color: var(--dim); font-size: 0.9rem; max-width: 62ch; }
+
+/* ------------------------------------------------------ section: governance */
+.gov-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem; margin-top: 2.2rem;
+}
+@media (max-width: 56rem) { .gov-grid { grid-template-columns: 1fr; } }
+.gov-card h3 {
+  font-family: var(--font-display); font-weight: 500;
+  font-size: 1.25rem; margin-bottom: 0.6rem;
+}
+.gov-card p { color: var(--muted); font-size: 0.92rem; }
+.gov-card .pill-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 1rem; }
+
+/* --------------------------------------------------------- section: agents */
+.mcp-block {
+  font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.9;
+  overflow-x: auto;
+  padding: 1.25rem 1.5rem;
+  white-space: pre;
+}
+.mcp-block .c-verb { color: var(--accent); }
+.mcp-block .c-tool { color: var(--primary); font-weight: 600; }
+.mcp-block .c-dim { color: var(--dim); }
+.mcp-block .c-warn { color: var(--warning); }
+
+/* ---------------------------------------------------------------- footer */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2.6rem 0 3.2rem;
+}
+.foot-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1.2rem; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 0.78rem; color: var(--dim);
+}
+.foot-row a { color: var(--muted); display: inline-flex; align-items: center; min-height: 44px; }
+.foot-row a:hover { color: var(--text); }
+.foot-brand { display: inline-flex; align-items: center; gap: 0.6rem; }
+.foot-brand svg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="top">
+  <a class="wordmark" href="#top" aria-label="Knowledge-Ops home">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="4.5" fill="var(--src-wiki)"/>
+      <circle cx="26" cy="8" r="2.2" fill="var(--src-memory)"/>
+      <circle cx="6" cy="24" r="2.2" fill="var(--src-meetings)"/>
+      <path d="M16 16 26 8M16 16 6 24" stroke="var(--src-wiki)" stroke-opacity=".45" stroke-width="1"/>
+    </svg>
+    Knowledge-Ops
+  </a>
+  <a class="top-console" href="/ui/">Open console →</a>
+</header>
+
+<main id="main">
+
+<!-- ================================================================ HERO -->
+<section class="hero" id="top" aria-label="Introduction">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="hero-nebula" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="kicker">Magic Unicorn · Governed organizational memory</p>
+    <h1>Watch your organization <span class="think">think.</span></h1>
+    <p class="lede">Knowledge-Ops is governed memory for your organization &mdash; every answer grounded in evidence you can inspect, scoped to who&rsquo;s allowed to see it.</p>
+    <div class="cta-row">
+      <a class="btn btn--primary" href="/ui/">Open your console</a>
+      <a class="btn" href="#grounding">See how grounding works</a>
+    </div>
+    <p class="hero-stats" aria-label="Corpus statistics">
+      <b>326</b> wiki pages<span class="sep">·</span><b>396</b> memories<span class="sep">·</span><b>1,734</b> meeting transcripts<span class="sep">·</span><b>62</b> documents<span class="sep">·</span>one governed corpus
+    </p>
+  </div>
+</section>
+
+<!-- ==================================================== EVIDENCE-FIRST -->
+<section id="grounding" aria-labelledby="grounding-title">
+  <div class="wrap split">
+    <div>
+      <p class="kicker">Evidence-first answers</p>
+      <h2 class="section-title" id="grounding-title">Never take the machine&rsquo;s word for it.</h2>
+      <p class="section-lede">Ask a question and Knowledge-Ops returns an answer built from cited passages &mdash; each citation opens to the exact source, with its scope, owner, and history attached.</p>
+      <ul class="feature-points">
+        <li><b>Every claim carries a chip.</b> Citations link to real passages, not vibes. Open any chip and audit it down to the document, the version, and who can see it.</li>
+        <li><b>Grounding verdicts are labeled for what they are.</b> Automated grounding is heuristic retrieval &mdash; so that&rsquo;s what we call it. Similarity scores never masquerade as verified fact.</li>
+        <li><b>Inspect, don&rsquo;t trust.</b> <span class="mono">inspect_citation</span> traces any answer back through the corpus. If the evidence isn&rsquo;t there, the answer says so.</li>
+      </ul>
+    </div>
+
+    <div class="card card--strong ask-card" role="img" aria-label="Example: asking &lsquo;What is our brand voice?&rsquo; returns an answer with two citations and a label reading &lsquo;related evidence — heuristic, not verification&rsquo;">
+      <div class="ask-query">
+        <span class="q">What is our brand voice?</span>
+        <span class="pill">scope: global</span>
+      </div>
+      <div class="ask-answer">
+        <p>Magic Unicorn writes with wonder <em>and</em> substance &mdash; playful, confident, a little unconventional, and always backed by evidence. Superlatives are earned, never decorative.<span class="cite">1</span></p>
+        <p>The same register carries into product copy: honest labels over hype, and claims the product can actually demonstrate.<span class="cite">2</span></p>
+      </div>
+      <ul class="evidence-list">
+        <li>
+          <span class="src-dot" style="background: var(--src-wiki)"></span>
+          <span class="ttl">[1] Magic Unicorn &mdash; Marketing &amp; Brand Bible (v1)</span>
+          <span class="score">wiki · 0.91</span>
+        </li>
+        <li>
+          <span class="src-dot" style="background: var(--src-meetings)"></span>
+          <span class="ttl">[2] Marketing sync &mdash; voice &amp; tone decisions</span>
+          <span class="score">meetings · 0.78</span>
+        </li>
+      </ul>
+      <div class="ask-honesty">
+        <span class="pill pill--honesty">related evidence — heuristic, not verification</span>
+        <small>This label is load-bearing. Retrieval found supporting passages; a human (or a stricter check) decides what counts as verified.</small>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= EVERY SOURCE -->
+<section aria-labelledby="sources-title">
+  <div class="wrap">
+    <p class="kicker">One brain, every source</p>
+    <h2 class="section-title" id="sources-title">Your organization already wrote the answer. Somewhere.</h2>
+    <p class="section-lede">Wiki pages, curated memories, meeting transcripts, shared documents &mdash; Knowledge-Ops federates them into one queryable corpus. One question fans out across every source you&rsquo;re allowed to see, re-ranks, and comes back cited.</p>
+
+    <div class="source-grid">
+      <div class="card source-card" style="--src: var(--src-wiki)">
+        <p class="src-name">Wiki</p>
+        <p class="count">326</p>
+        <p>Governed pages with review, scopes, and full version history.</p>
+      </div>
+      <div class="card source-card" style="--src: var(--src-memory)">
+        <p class="src-name">Org memory</p>
+        <p class="count">396</p>
+        <p>Curated decisions, gotchas, and context &mdash; the stuff that otherwise lives in one person&rsquo;s head.</p>
+      </div>
+      <div class="card source-card" style="--src: var(--src-meetings)">
+        <p class="src-name">Meetings</p>
+        <p class="count">1,734</p>
+        <p>Diarized transcripts, summarized and searchable down to who said what.</p>
+      </div>
+      <div class="card source-card" style="--src: var(--src-docs)">
+        <p class="src-name">Documents</p>
+        <p class="count">62</p>
+        <p>Files shared through Stable, indexed with their access scope intact.</p>
+      </div>
+    </div>
+    <p class="sources-tail">2,518 passages and counting &mdash; from <span class="mono">Majiks Launch Runbook</span> to <span class="mono">engineering/meeting-ops-inference-pipeline.md</span>. Real corpus, real citations, no demo data.</p>
+  </div>
+</section>
+
+<!-- ======================================================== GOVERNANCE -->
+<section aria-labelledby="gov-title">
+  <div class="wrap">
+    <p class="kicker">Governance built in</p>
+    <h2 class="section-title" id="gov-title">Memory you can defend in an audit.</h2>
+    <p class="section-lede">A knowledge base is only as trustworthy as what it lets in, who it shows things to, and what it can prove afterwards. Knowledge-Ops treats all three as product, not policy documents.</p>
+
+    <div class="gov-grid">
+      <div class="card gov-card">
+        <h3>Reviewed before it&rsquo;s memory</h3>
+        <p>Nothing enters the corpus unvetted. Every candidate passes through a review queue with provenance, access, privacy, and content checks &mdash; approve, edit, or reject, with a paper trail either way.</p>
+        <div class="pill-row">
+          <span class="pill">provenance</span>
+          <span class="pill">access</span>
+          <span class="pill">privacy</span>
+          <span class="pill">content</span>
+        </div>
+      </div>
+      <div class="card gov-card">
+        <h3>Scoped to the reader</h3>
+        <p>Global, personal, restricted &mdash; scope is enforced at query time, not at write time. The same question returns different evidence for different people, by design. Nobody retrieves what they couldn&rsquo;t read.</p>
+        <div class="pill-row">
+          <span class="pill">global</span>
+          <span class="pill">personal</span>
+          <span class="pill">restricted</span>
+        </div>
+      </div>
+      <div class="card gov-card">
+        <h3>History &amp; honest deletion</h3>
+        <p>Every document carries version history you can diff. Deletions flow through an audited outbox, so &ldquo;forgotten&rdquo; means verifiably removed everywhere &mdash; index, store, and citations alike.</p>
+        <div class="pill-row">
+          <span class="pill">doc_history</span>
+          <span class="pill">deletion outbox</span>
+          <span class="pill">audit log</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================== AGENTS -->
+<section aria-labelledby="agents-title">
+  <div class="wrap split">
+    <div>
+      <p class="kicker">Agents share the same brain</p>
+      <h2 class="section-title" id="agents-title">Your agents ground where your people do.</h2>
+      <p class="section-lede">Knowledge-Ops is MCP-native. Agents call the <span class="mono">/mcp</span> endpoint and get the same governed corpus your team curates &mdash; same scopes, same review queue, same audit log. No shadow knowledge bases quietly drifting out of date.</p>
+      <ul class="feature-points">
+        <li><b>Storage-opaque.</b> Agents never touch the backing stores. They ask; the service federates, re-ranks, and answers with citations.</li>
+        <li><b>Governed by default.</b> An agent&rsquo;s answer is auditable the same way a person&rsquo;s search is &mdash; every tool call lands in the audit log.</li>
+        <li><b>Honest to machines, too.</b> <span class="mono">knowledge.ground</span> returns its verdicts labeled heuristic, so downstream agents can&rsquo;t launder retrieval into certainty.</li>
+      </ul>
+    </div>
+
+    <div class="card card--strong mcp-block" role="img" aria-label="The /mcp endpoint exposes tools including knowledge.search, knowledge.ground, knowledge.get_doc, and knowledge.inspect_citation"><span class="c-verb">POST</span> /mcp
+
+<span class="c-tool">knowledge.search</span>            <span class="c-dim">federated, re-ranked, cited retrieval</span>
+<span class="c-tool">knowledge.ground</span>            <span class="c-dim">claim &harr; evidence,</span> <span class="c-warn">labeled heuristic</span>
+<span class="c-tool">knowledge.get_doc</span>           <span class="c-dim">governed pages, with history</span>
+<span class="c-tool">knowledge.inspect_citation</span>  <span class="c-dim">audit any chip to its source</span>
+<span class="c-tool">knowledge.list_sources</span>      <span class="c-dim">what this caller may see</span>
+
+<span class="c-dim">&hellip; scoped per-caller, audited per-call.</span></div>
+  </div>
+</section>
+
+</main>
+
+<!-- =========================================================== FOOTER -->
+<footer>
+  <div class="wrap foot-row">
+    <span class="foot-brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="4.5" fill="var(--src-wiki)"/>
+        <circle cx="26" cy="8" r="2.2" fill="var(--src-memory)"/>
+        <circle cx="6" cy="24" r="2.2" fill="var(--src-meetings)"/>
+        <path d="M16 16 26 8M16 16 6 24" stroke="var(--src-wiki)" stroke-opacity=".45" stroke-width="1"/>
+      </svg>
+      Magic Unicorn Unconventional Technology &amp; Stuff
+    </span>
+    <span>Governed memory</span>
+    <a href="/ui/">Open your console →</a>
+  </div>
+</footer>
+
+<script>
+/* ================================================================
+   Hero mini-constellation.
+   ~90 nodes colored by source palette, hairline edges between near
+   neighbors, slow autonomous drift + gentle pointer parallax.
+   prefers-reduced-motion  -> single static frame.
+   prefers-color-scheme    -> aurora (source colors) or daylight
+                              (ink nodes, gold hairline edges).
+   ================================================================ */
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('sky');
+  if (!canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext('2d');
+
+  var mqMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var mqLight = window.matchMedia('(prefers-color-scheme: light)');
+
+  var N = 90;
+  var LINK = 130;              // max edge length (css px, scaled by depth)
+  var nodes = [];
+  var W = 0, H = 0, DPR = 1;
+  var px = 0, py = 0;          // eased parallax offset
+  var tpx = 0, tpy = 0;        // target parallax offset
+  var raf = 0;
+  var palette = null;
+
+  // Source mix roughly echoes the real corpus (visually balanced).
+  var MIX = [
+    { key: 'wiki',     w: 0.24 },
+    { key: 'memory',   w: 0.26 },
+    { key: 'meetings', w: 0.34 },
+    { key: 'docs',     w: 0.16 }
+  ];
+
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function readPalette() {
+    palette = {
+      daylight: mqLight.matches,
+      star: cssVar('--canvas-star'),
+      edge: cssVar('--canvas-edge'),          // "r, g, b"
+      src: {
+        wiki: cssVar('--src-wiki'),
+        memory: cssVar('--src-memory'),
+        meetings: cssVar('--src-meetings'),
+        docs: cssVar('--src-docs')
+      }
+    };
+  }
+
+  function pickSource() {
+    var r = Math.random(), acc = 0;
+    for (var i = 0; i < MIX.length; i++) {
+      acc += MIX[i].w;
+      if (r <= acc) return MIX[i].key;
+    }
+    return MIX[MIX.length - 1].key;
+  }
+
+  function seed() {
+    nodes.length = 0;
+    for (var i = 0; i < N; i++) {
+      var z = 0.35 + Math.random() * 0.65;   // depth: 0.35 far .. 1 near
+      var a = Math.random() * Math.PI * 2;
+      var speed = (2.2 + Math.random() * 2.6) * z;   // px per second — slow drift
+      nodes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        z: z,
+        r: (0.8 + Math.random() * 1.5) * z,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        src: pickSource(),
+        ph: Math.random() * Math.PI * 2       // twinkle phase
+      });
+    }
+  }
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (!nodes.length) seed();
+    if (mqMotion.matches) draw(0);
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, W, H);
+    var i, j, a, b, n;
+
+    // Edges — hairlines between near neighbors, alpha falls off with distance.
+    ctx.lineWidth = 0.6;
+    for (i = 0; i < N; i++) {
+      a = nodes[i];
+      var ax = a.x + px * a.z, ay = a.y + py * a.z;
+      for (j = i + 1; j < N; j++) {
+        b = nodes[j];
+        var bx = b.x + px * b.z, by = b.y + py * b.z;
+        var dx = ax - bx, dy = ay - by;
+        var max = LINK * Math.min(a.z, b.z);
+        var d2 = dx * dx + dy * dy;
+        if (d2 < max * max) {
+          var alpha = (1 - Math.sqrt(d2) / max) * (palette.daylight ? 0.38 : 0.30);
+          ctx.strokeStyle = 'rgba(' + palette.edge + ',' + alpha.toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(bx, by);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Nodes — aurora: source palette; daylight: ink engraving.
+    for (i = 0; i < N; i++) {
+      n = nodes[i];
+      var tw = mqMotion.matches ? 1 : 0.78 + 0.22 * Math.sin(t / 1000 * 0.8 + n.ph);
+      ctx.globalAlpha = (palette.daylight ? 0.82 : 0.9) * tw * (0.5 + n.z * 0.5);
+      ctx.fillStyle = palette.daylight ? palette.star : (palette.src[n.src] || palette.star);
+      ctx.beginPath();
+      ctx.arc(n.x + px * n.z, n.y + py * n.z, n.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  var last = 0;
+  function tick(t) {
+    raf = requestAnimationFrame(tick);
+    var dt = Math.min((t - last) / 1000, 0.05);
+    last = t;
+
+    // Ease parallax toward pointer target — a settle, not a bounce.
+    px += (tpx - px) * Math.min(dt * 2.5, 1);
+    py += (tpy - py) * Math.min(dt * 2.5, 1);
+
+    for (var i = 0; i < N; i++) {
+      var n = nodes[i];
+      n.x += n.vx * dt;
+      n.y += n.vy * dt;
+      var m = 24;
+      if (n.x < -m) n.x = W + m; else if (n.x > W + m) n.x = -m;
+      if (n.y < -m) n.y = H + m; else if (n.y > H + m) n.y = -m;
+    }
+    draw(t);
+  }
+
+  function start() {
+    cancelAnimationFrame(raf);
+    if (mqMotion.matches) { draw(0); return; }
+    last = performance.now();
+    raf = requestAnimationFrame(tick);
+  }
+
+  window.addEventListener('pointermove', function (e) {
+    if (mqMotion.matches) return;
+    tpx = (e.clientX / Math.max(W, 1) - 0.5) * 26;
+    tpy = (e.clientY / Math.max(H, 1) - 0.5) * 18;
+  }, { passive: true });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) cancelAnimationFrame(raf);
+    else start();
+  });
+
+  function onScheme() { readPalette(); if (mqMotion.matches) draw(0); }
+  if (mqLight.addEventListener) {
+    mqLight.addEventListener('change', onScheme);
+    mqMotion.addEventListener('change', function () { readPalette(); start(); });
+  }
+  window.addEventListener('resize', resize);
+
+  readPalette();
+  resize();
+  start();
+})();
+</script>
+
+</body>
+</html>
