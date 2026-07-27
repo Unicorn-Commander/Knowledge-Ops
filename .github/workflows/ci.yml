@@ -43,7 +43,7 @@ jobs:
           python -m knowledge_ops.cli evaluate-memory
           ruff check knowledge_ops tests
           python -m compileall -q knowledge_ops tests
-          node --check knowledge_ops/static/app.js
+          find knowledge_ops/static/ui -name '*.js' -print0 | xargs -0 -n1 node --check
           docker compose config --quiet
           docker compose --profile worker config --quiet
           docker compose -f docker-compose.yml -f docker-compose.bigboy.yml \

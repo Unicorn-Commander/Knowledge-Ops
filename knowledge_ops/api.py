@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, federation, mcp_http
+from . import __version__, federation, graph_api, mcp_http
 from .authorization import (
     AuthorizationError,
     Principal,
@@ -379,12 +379,15 @@ def kb_upsert_doc(req: DocRequest, principal: ApiPrincipal) -> dict:
         review_due_at=req.review_due_at,
     )
     record_audit(principal.subject, "wiki.upsert", doc_id, "success", {"scope": scope, "path": req.path})
+    graph_api.invalidate_link_caches()
     return {"id": doc_id}
 
 
 @app.post("/kb.delete_doc")
 def kb_delete_doc(id: str, req: DeleteRequest, principal: ApiPrincipal) -> dict:
-    return {"deletion": tombstone_doc(id, principal=principal, reason=req.reason)}
+    deletion = tombstone_doc(id, principal=principal, reason=req.reason)
+    graph_api.invalidate_link_caches()
+    return {"deletion": deletion}
 
 
 @app.post("/kb.inspect_citation")
@@ -593,7 +596,14 @@ def kb_openwiki_reject(id: str, req: OpenWikiReviewRequest, principal: ApiPrinci
     return reject_import(id, principal, req.note)
 
 
+# Constellation graph/stats/identity endpoints (kb.graph, kb.stats, kb.me).
+app.include_router(graph_api.router)
+
+
 # Web GUI — served by this app itself (no build step, no CDN). Mounted last so it
 # never shadows the API routes above. `html=True` serves index.html at /ui/.
 if _STATIC_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
+_LANDING_DIR = _STATIC_DIR / "landing"
+if _LANDING_DIR.is_dir():
+    app.mount("/landing", StaticFiles(directory=str(_LANDING_DIR), html=True), name="landing")

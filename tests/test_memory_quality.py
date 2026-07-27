@@ -461,11 +461,11 @@ def test_deterministic_memory_evaluation_passes():
 def test_memory_quality_ui_has_accessible_dialog_and_mobile_controls():
     root = Path(__file__).resolve().parent.parent / "knowledge_ops" / "static"
     html = (root / "index.html").read_text()
-    css = (root / "styles.css").read_text()
-    js = (root / "app.js").read_text()
+    css = (root / "ui" / "base.css").read_text()
+    ask_js = (root / "ui" / "views" / "ask.js").read_text()
     assert '<dialog class="citation-dialog"' in html and 'aria-labelledby="citationTitle"' in html
     assert 'aria-label="Close citation inspection"' in html
-    assert "Inspect source" in js and "renderHighlightedExcerpt" in js
-    assert "100dvh" in css and "safe-area-inset-bottom" in css and "min-height: 44px" in css
-    assert ".input.mono { font-size: 1rem; }" in css
-    assert "onclick=" not in html and "onclick=" not in js
+    # Span inspection lives in the ask view now, with match-range highlighting.
+    assert "Inspect span" in ask_js and "match_ranges" in ask_js
+    assert "min-height: 44px" in css and "prefers-reduced-motion" in css
+    assert "onclick=" not in html and "onclick=" not in ask_js

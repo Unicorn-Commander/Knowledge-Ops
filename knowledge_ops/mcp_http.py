@@ -103,6 +103,10 @@ def _t_upsert_doc(a: dict, principal: Principal) -> dict:
         review_due_at=a.get("review_due_at"),
     )
     record_audit(principal.subject, "mcp.wiki.upsert", doc_id, "success", {"scope": scope})
+    # Mirror api.py kb.upsert_doc: drop the cached link + constellation graphs so
+    # writes through the brokered MCP path show up immediately, not after TTL.
+    from . import graph_api
+    graph_api.invalidate_link_caches()
     return {"id": doc_id}
 
 
@@ -113,7 +117,11 @@ def _t_inspect_citation(a: dict, principal: Principal) -> dict:
 
 
 def _t_delete_doc(a: dict, principal: Principal) -> dict:
-    return {"deletion": tombstone_doc(a["id"], principal=principal, reason=a["reason"])}
+    deletion = tombstone_doc(a["id"], principal=principal, reason=a["reason"])
+    # Mirror api.py kb.delete_doc: invalidate so backlinks/orphans refresh at once.
+    from . import graph_api
+    graph_api.invalidate_link_caches()
+    return {"deletion": deletion}
 
 
 def _t_record_metric(a: dict, principal: Principal) -> dict:
