@@ -7,7 +7,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise SystemExit("Install MCP support first: pip install 'knowledge-ops[mcp]' or pip install mcp") from exc
 
-from . import federation
+from . import federation, graph_api
 from .authorization import authorized_write_target, filter_passages, system_principal
 from .citations import inspect_citation
 from .file_index import deep_read, find_file
@@ -110,6 +110,32 @@ def kb_deep_read(path: str, query: str = "", k: int = 8) -> dict:
     return {"passages": [p.__dict__ for p in filter_passages(
         _LOCAL, deep_read(path, query, k, principal=_LOCAL)
     )]}
+
+
+# Read-parity tools (duplicated from the HTTP-MCP shim's table, like every tool
+# above): call graph_api's route functions directly so stdio agents see exactly
+# what the Observatory UI and GET /kb.graph|links|stats|me return.
+@mcp.tool(name="kb.graph")
+def kb_graph(scope: str = "", limit_per_coll: int = 100) -> dict:
+    return asyncio.run(graph_api.kb_graph(
+        _LOCAL, scope=scope or None, limit_per_coll=limit_per_coll,
+    ))
+
+
+@mcp.tool(name="kb.links")
+def kb_links(scope: str = "") -> dict:
+    return graph_api.kb_links(_LOCAL, scope=scope or None)
+
+
+@mcp.tool(name="kb.stats")
+def kb_stats() -> dict:
+    return asyncio.run(graph_api.kb_stats(_LOCAL))
+
+
+@mcp.tool(name="kb.whoami")
+def kb_whoami() -> dict:
+    # stdio always runs as the explicit local-system principal (see _LOCAL).
+    return graph_api.kb_me(_LOCAL)
 
 
 if __name__ == "__main__":

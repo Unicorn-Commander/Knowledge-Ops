@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from . import __version__, federation
+from . import __version__, federation, graph_api
 from .authorization import (
     AuthorizationError,
     Principal,
@@ -130,6 +130,31 @@ def _t_record_metric(a: dict, principal: Principal) -> dict:
     return {"id": metric_id}
 
 
+# The four read-parity tools call graph_api's route functions DIRECTLY (they are
+# plain functions taking the principal first), so MCP agents see byte-for-byte
+# what the Observatory UI sees — same visibility filters, same scope validation
+# (principal.require / validate_requested_scope run inside those functions),
+# same per-visibility-identity caches. Nothing is reimplemented here.
+async def _t_graph(a: dict, principal: Principal) -> dict:
+    return await graph_api.kb_graph(
+        principal, scope=a.get("scope"), limit_per_coll=int(a.get("limit_per_coll", 100)),
+    )
+
+
+def _t_links(a: dict, principal: Principal) -> dict:
+    return graph_api.kb_links(principal, scope=a.get("scope"))
+
+
+async def _t_stats(a: dict, principal: Principal) -> dict:
+    return await graph_api.kb_stats(principal)
+
+
+def _t_whoami(a: dict, principal: Principal) -> dict:
+    # Mirrors GET /kb.me: no scope requirement, any verified principal may
+    # introspect itself (the manifest advertises scopes_required: []).
+    return graph_api.kb_me(principal)
+
+
 # manifest tool name -> handler (manifest is the single source of truth for the
 # names/schemas; this table is the execution half of each tool's `rest` mapping).
 _HANDLERS: dict[str, Callable[[dict, Principal], Any | Awaitable[Any]]] = {
@@ -145,6 +170,10 @@ _HANDLERS: dict[str, Callable[[dict, Principal], Any | Awaitable[Any]]] = {
     "inspect_citation": _t_inspect_citation,
     "delete_doc": _t_delete_doc,
     "record_metric": _t_record_metric,
+    "graph": _t_graph,
+    "links": _t_links,
+    "stats": _t_stats,
+    "whoami": _t_whoami,
 }
 
 

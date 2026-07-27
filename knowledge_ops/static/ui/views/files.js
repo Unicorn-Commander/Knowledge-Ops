@@ -58,6 +58,7 @@ function injectStyles() {
     color: var(--mu-color-muted);
   }
   #view-files .fl-zone { border-top: 1px solid var(--mu-hairline); margin-top: 2rem; padding-top: 1.3rem; }
+  #view-files .fl-about { font-size: .8rem; margin: -.5rem 0 1.1rem; }
   #view-files .fl-arrow { color: var(--mu-color-dim); font-size: .78rem; font-family: var(--mu-font-mono); white-space: nowrap; }
   @media (max-width: 700px) { #view-files .fl-hit .item__meta { flex-wrap: wrap; justify-content: flex-end; } }
   `;
@@ -73,15 +74,16 @@ export function init(section, ctx) {
     <p class="kicker">Indexed</p>
     <h1 class="title">Files</h1>
     <p class="lede">Search content inside approved roots, then deep-read the exact chunks the index holds.</p>
+    <p class="dim fl-about">About this view — semantic search over the governed file index, with chunk-level deep reads of what the index actually stores. <a href="#help">Learn more</a></p>
 
     <div class="fl-search" role="search" aria-label="File search">
       <div class="field field--grow">
         <label class="lbl" for="flQuery">File search</label>
-        <input class="input" id="flQuery" placeholder="e.g. brand bible, meeting-ops inference pipeline" />
+        <input class="input" id="flQuery" data-hint-title="Semantic search" data-hint="Searches the meaning of indexed chunk content, not just filenames — plain language works." placeholder="e.g. brand bible, meeting-ops inference pipeline" />
       </div>
       <div class="field">
         <label class="lbl" for="flScope">Visibility</label>
-        <select class="select" id="flScope">
+        <select class="select" id="flScope" data-hint-title="Visibility" data-hint="default = yours plus shared · personal = only files you own · global = org-wide memory only · all = everything you can access.">
           <option value="">default</option>
           <option value="personal">personal</option>
           <option value="global">global</option>
@@ -126,10 +128,10 @@ export function init(section, ctx) {
               <div class="item__sub">${esc(path)}</div>
             </div>
             <div class="item__meta">
-              <span class="src-badge ${srcClass(p.source)}">${esc(srcLabel(p.source))}</span>
-              ${p.scope ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : ""}
-              <span class="mono">${fmtScore(p.score, esc)}</span>
-              <span class="fl-arrow">deep-read →</span>
+              <span class="src-badge ${srcClass(p.source)}" data-hint-title="Source" data-hint="The store that indexed this match — files means the governed chunk index built from approved roots on the server.">${esc(srcLabel(p.source))}</span>
+              ${p.scope ? `<span class="pill pill--scope" data-hint="Visibility of this file's chunks — personal means only you can retrieve them.">${esc(p.scope)}</span>` : ""}
+              <span class="mono" aria-label="relevance score ${fmtScore(p.score, esc)}" data-hint-title="Score" data-hint="Similarity between your query and this chunk, 0–1 — a ranking signal, not a judgment of quality.">${fmtScore(p.score, esc)}</span>
+              <span class="fl-arrow" data-hint="Opens this file's indexed chunks below with your query highlighted — exactly what the index holds, not the live file on disk.">deep-read →</span>
             </div>
           </button>`;
         }).join("")}</div>`;
@@ -151,8 +153,8 @@ export function init(section, ctx) {
             <div class="cite__head">
               <span class="cite__n">${i + 1}</span>
               <span class="cite__title">${esc(p.title || p.source_id || "chunk")}</span>
-              ${p.scope ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : ""}
-              <span class="cite__meta">score ${fmtScore(p.score, esc)}</span>
+              ${p.scope ? `<span class="pill pill--scope" data-hint="Visibility of this chunk — who is allowed to retrieve it.">${esc(p.scope)}</span>` : ""}
+              <span class="cite__meta" data-hint="Chunk relevance to your query, 0–1 — ranking only.">score ${fmtScore(p.score, esc)}</span>
             </div>
             <pre class="fl-pre">${highlight(p.text, query, esc)}</pre>
           </div>`).join("")}</div>` : `<div class="empty">No chunks indexed for this file.</div>`);
@@ -182,9 +184,9 @@ export function init(section, ctx) {
     <div class="fl-search">
       <div class="field field--grow">
         <label class="lbl" for="flRoot">Approved root path</label>
-        <input class="input mono" id="flRoot" placeholder="/srv/knowledge/approved-root" />
+        <input class="input mono" id="flRoot" data-hint-title="Approved root" data-hint="Absolute server path to index. Only pre-approved roots are accepted — anything else is refused." placeholder="/srv/knowledge/approved-root" />
       </div>
-      <button type="button" class="btn field-action" id="flIndexBtn">Index files</button>
+      <button type="button" class="btn field-action" id="flIndexBtn" data-hint="Chunks and embeds readable files under this root into the governed file index. Admin-only; asks for confirmation before running.">Index files</button>
     </div>
     <div id="flIndexStatus" aria-live="polite"></div>`;
 

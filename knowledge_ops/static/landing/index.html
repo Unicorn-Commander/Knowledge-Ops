@@ -11,7 +11,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Magic Unicorn Knowledge-Ops">
 <meta name="theme-color" content="#070512">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23c9b6ff'/%3E%3Ccircle cx='26' cy='8' r='2.2' fill='%237fe3d2'/%3E%3Ccircle cx='6' cy='24' r='2.2' fill='%2392b5f7'/%3E%3Cpath d='M16 16 26 8M16 16 6 24' stroke='%23c9b6ff' stroke-opacity='.45' stroke-width='1'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23a78bfa'/%3E%3Cstop offset='1' stop-color='%234ed3c2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='54' r='42' fill='url(%23g)'/%3E%3Cpath d='M58 30 84 4 66 40z' fill='url(%23g)'/%3E%3Cpath d='M58 30 84 4 66 40' fill='none' stroke='%23ece9f8' stroke-width='4' stroke-linejoin='round'/%3E%3Ccircle cx='58' cy='56' r='7' fill='%23070512'/%3E%3C/svg%3E">
 
 <style>
 /* ============================================================ typeface
@@ -174,7 +174,7 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
   color: var(--text); text-decoration: none;
   min-height: 44px;
 }
-.wordmark svg { width: 20px; height: 20px; flex: none; }
+.wordmark svg { width: 27px; height: 27px; flex: none; }
 .wordmark .tag {
   font-family: var(--font-mono); font-weight: 400; font-size: 0.62rem;
   letter-spacing: 0.24em; text-transform: uppercase;
@@ -271,6 +271,23 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
 .hero-readout b { color: var(--muted); font-weight: 500; }
 .hero-readout .sep { margin: 0 0.55em; opacity: 0.55; }
 
+/* the Stargazer — one large, quiet appearance beside the hero */
+.hero-mark {
+  position: absolute; z-index: 1; pointer-events: none;
+  right: clamp(-3.5rem, 3vw, 7rem);
+  top: 50%; transform: translateY(-53%);
+  width: clamp(19rem, 37vw, 32rem);
+  opacity: 0.44;
+}
+.hero-mark svg { width: 100%; height: auto; }
+@media (max-width: 62rem) {
+  .hero-mark {
+    right: -3.5rem; top: 4.5rem; transform: none;
+    width: clamp(13rem, 46vw, 19rem);
+    opacity: 0.3;
+  }
+}
+
 /* ============================================================ how — plates */
 .plates {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -366,6 +383,84 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
   fill: var(--dim);
 }
 
+/* ============================================================ orbit — 3D graph */
+.orbit-plate {
+  margin-top: 2.4rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--pane);
+  overflow: hidden;
+}
+.orbit-stage {
+  position: relative;
+  background: var(--field);
+  border-bottom: 1px solid var(--hairline);
+}
+.orbit-stage svg { width: 100%; height: auto; display: block; }
+.ign-ring {
+  animation: ign 3.4s ease-in-out infinite;
+}
+.ign-ring--late { animation-delay: -1.7s; }
+@keyframes ign {
+  0%, 100% { opacity: 0.34; }
+  50% { opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ign-ring, .ign-ring--late { animation: none; opacity: 0.6; }
+}
+.orbit-legend {
+  display: flex; flex-wrap: wrap; gap: 0.3rem 1.3rem;
+  padding: 0.85rem clamp(1.2rem, 3vw, 2rem);
+  border-bottom: 1px solid var(--hairline);
+}
+.orbit-legend .lg {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.06em;
+  color: var(--muted); white-space: nowrap;
+  min-height: 28px;
+}
+.orbit-legend .lg i { display: inline-grid; place-items: center; }
+.orbit-legend .lg svg { width: 11px; height: 11px; }
+.orbit-rows { padding: 0 clamp(1.2rem, 3vw, 2rem); }
+
+/* ============================================================ automate */
+.auto-plate {
+  margin-top: 2.4rem;
+  display: grid; grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--pane);
+  overflow: hidden;
+}
+@media (max-width: 62rem) { .auto-plate { grid-template-columns: 1fr; } }
+.auto-info { padding: clamp(1.25rem, 2.5vw, 1.7rem); }
+.auto-fact { padding: 0.95rem 0; }
+.auto-fact + .auto-fact { border-top: 1px solid var(--hairline); }
+.auto-fact b {
+  display: block; font-family: var(--font-display); font-weight: 600;
+  font-size: 1.08rem; margin-bottom: 0.25rem;
+}
+.auto-fact p { color: var(--muted); font-size: 0.92rem; line-height: 1.6; }
+.auto-fact .mono { font-size: 0.85em; color: var(--dim); word-break: break-word; }
+.auto-term {
+  background: var(--field);
+  border-left: 1px solid var(--hairline);
+  padding: clamp(1.1rem, 2.2vw, 1.5rem) clamp(1.1rem, 2.4vw, 1.7rem);
+  font-family: var(--font-mono); font-size: 0.76rem; line-height: 1.75;
+  overflow-x: auto;
+}
+@media (max-width: 62rem) { .auto-term { border-left: 0; border-top: 1px solid var(--hairline); } }
+.auto-term pre { font: inherit; white-space: pre; }
+.auto-term .t-dim { color: var(--dim); }
+.auto-term .t-key { color: var(--primary); }
+.auto-term .t-str { color: var(--accent); }
+.auto-term .t-brass { color: var(--brass); }
+.auto-term .t-txt { color: var(--text); }
+
 /* ============================================================ governance */
 .gov-plate {
   margin-top: 2.4rem;
@@ -391,12 +486,12 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
 .gov-val .mono { font-size: 0.85em; color: var(--dim); }
 @media (max-width: 34rem) { .gov-row { grid-template-columns: 1fr; } }
 
-/* ============================================================ four skies */
+/* ============================================================ five skies */
 .skies {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1rem; margin-top: 2.4rem;
 }
-@media (min-width: 62rem) { .skies { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 62rem) { .skies { grid-template-columns: repeat(5, 1fr); } }
 .sw { min-width: 0; }
 .sw-sky {
   position: relative;
@@ -420,6 +515,25 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
 }
 .sw-name b { font-family: var(--font-display); font-weight: 600; font-size: 0.98rem; }
 .sw-name span { font-family: var(--font-mono); font-size: 0.66rem; color: var(--dim); letter-spacing: 0.05em; }
+/* narrow cards: some names wrap to two lines — reserve the space on all five
+   so the calibration rows start level */
+@media (max-width: 62rem) { .sw-name { min-height: 2.6rem; align-content: flex-start; } }
+
+/* calibration plate: the theme's real token values, verbatim from tokens.css */
+.sw-spec { list-style: none; margin-top: 0.55rem; padding: 0 0.15rem; }
+.sw-spec li {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-mono); font-size: 0.63rem; letter-spacing: 0.05em;
+  color: var(--dim);
+  padding: 0.26rem 0;
+}
+.sw-spec li + li { border-top: 1px solid var(--hairline); }
+.sw-spec i {
+  width: 11px; height: 11px; border-radius: 3.5px; flex: none;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.sw-spec code { margin-left: auto; font-family: inherit; color: var(--muted); }
 
 .sw-sky svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
@@ -440,6 +554,14 @@ main section { padding: clamp(4.5rem, 10vh, 7rem) 0; border-top: 1px solid var(-
     #f4f2ed;
 }
 .sw--daylight .sw-chip { background: linear-gradient(135deg, #6d4fd8, #0f8d7f); }
+.sw--porcelain .sw-sky {
+  color: #6e6a7e;
+  background:
+    radial-gradient(110% 80% at 80% -15%, #eceef8 0%, rgba(236,238,248,0) 55%),
+    radial-gradient(95% 80% at 4% 112%, #e7f2f0 0%, rgba(231,242,240,0) 55%),
+    #f7f8fa;
+}
+.sw--porcelain .sw-chip { background: linear-gradient(135deg, #6b4fd0, #0e9488); }
 .sw--nebula .sw-sky {
   color: #f0b36c;
   background:
@@ -468,7 +590,7 @@ footer {
   color: var(--dim);
 }
 .foot-brand { display: inline-flex; align-items: center; gap: 0.6rem; min-height: 44px; color: var(--muted); }
-.foot-brand svg { width: 16px; height: 16px; flex: none; }
+.foot-brand svg { width: 20px; height: 20px; flex: none; }
 .foot-row a {
   color: var(--muted); text-decoration: none;
   display: inline-flex; align-items: center; min-height: 44px;
@@ -485,11 +607,39 @@ footer {
 
 <header class="top">
   <a class="wordmark" href="#top" aria-label="Knowledge-Ops home">
-    <svg viewBox="0 0 32 32" aria-hidden="true">
-      <circle cx="16" cy="16" r="4.4" fill="#c9b6ff"/>
-      <circle cx="26" cy="8" r="2.1" fill="#7fe3d2"/>
-      <circle cx="6" cy="24" r="2.1" fill="#92b5f7"/>
-      <path d="M16 16 26 8M16 16 6 24" stroke="#c9b6ff" stroke-opacity=".45" stroke-width="1"/>
+    <!-- the Stargazer, cut for small sizes: same constellation, heavier stars -->
+    <svg viewBox="0 0 120 120" aria-hidden="true">
+      <g stroke="#8f86c9" stroke-opacity="0.55" stroke-width="3" fill="none" stroke-linecap="round">
+        <path d="M66 34 88 10M74 40 88 10M66 34 74 40"/>
+        <path d="M60 36 54 24 66 32"/>
+        <path d="M66 34 72 46 90 52 100 60 96 68 84 71"/>
+        <path d="M84 71 70 80 56 85"/>
+        <path d="M60 36 46 44 34 58 28 76 46 99"/>
+        <path d="M56 85 46 99"/>
+        <path d="M46 44 33 49M43 58 29 63M40 72 29 80"/>
+      </g>
+      <g fill="#ece9f8">
+        <circle cx="88" cy="10" r="7" fill="#4ed3c2"/>
+        <circle cx="66" cy="34" r="5.2" fill="#a78bfa"/>
+        <circle cx="74" cy="40" r="4.4"/>
+        <circle cx="54" cy="24" r="5" fill="#a78bfa"/>
+        <circle cx="60" cy="36" r="4.2"/>
+        <circle cx="72" cy="46" r="4"/>
+        <circle cx="90" cy="52" r="4.8" fill="#a78bfa"/>
+        <circle cx="100" cy="60" r="6.2" fill="#4ed3c2"/>
+        <circle cx="96" cy="68" r="4.2"/>
+        <circle cx="84" cy="71" r="4.8" fill="#a78bfa"/>
+        <circle cx="70" cy="80" r="4.2"/>
+        <circle cx="56" cy="85" r="4.8" fill="#a78bfa"/>
+        <circle cx="46" cy="99" r="6" fill="#4ed3c2"/>
+        <circle cx="46" cy="44" r="4.4"/>
+        <circle cx="34" cy="58" r="4.8" fill="#a78bfa"/>
+        <circle cx="28" cy="76" r="5.2" fill="#4ed3c2"/>
+        <circle cx="33" cy="49" r="3.4"/>
+        <circle cx="29" cy="63" r="3.4"/>
+        <circle cx="29" cy="80" r="3.4"/>
+        <circle cx="74" cy="53" r="6.4" fill="#d9a96c"/>
+      </g>
     </svg>
     Knowledge-Ops <span class="tag">Observatory</span>
   </a>
@@ -501,6 +651,52 @@ footer {
 <!-- ================================================================ HERO -->
 <section class="hero" id="top" aria-label="Introduction" style="border-top:0">
   <div class="hero-scrim" aria-hidden="true"></div>
+  <div class="hero-mark" aria-hidden="true">
+    <!-- the Stargazer at full fidelity — inlined from the brand mark -->
+    <svg viewBox="0 0 120 120">
+      <defs>
+        <filter id="soft-hero" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="1.05" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <g stroke="#8f86c9" stroke-opacity="0.6" stroke-width="1.05" fill="none" stroke-linecap="round">
+        <path d="M66 34 88 10"/>
+        <path d="M74 40 88 10"/>
+        <path d="M66 34 74 40"/>
+        <path d="M60 36 54 24 66 32"/>
+        <path d="M66 34 72 46 90 52 100 60 96 68 84 71"/>
+        <path d="M84 71 70 80 56 85"/>
+        <path d="M60 36 46 44 34 58 28 76 46 99"/>
+        <path d="M56 85 46 99"/>
+        <path d="M46 44 33 49"/>
+        <path d="M43 58 29 63"/>
+        <path d="M40 72 29 80"/>
+      </g>
+      <g filter="url(#soft-hero)">
+        <circle cx="88" cy="10" r="2.8" fill="#4ed3c2"/>
+        <circle cx="66" cy="34" r="2.0" fill="#a78bfa"/>
+        <circle cx="74" cy="40" r="1.7" fill="#ece9f8"/>
+        <circle cx="54" cy="24" r="1.9" fill="#a78bfa"/>
+        <circle cx="60" cy="36" r="1.5" fill="#ece9f8"/>
+        <circle cx="72" cy="46" r="1.5" fill="#ece9f8"/>
+        <circle cx="90" cy="52" r="1.8" fill="#a78bfa"/>
+        <circle cx="100" cy="60" r="2.4" fill="#4ed3c2"/>
+        <circle cx="96" cy="68" r="1.5" fill="#ece9f8"/>
+        <circle cx="84" cy="71" r="1.8" fill="#a78bfa"/>
+        <circle cx="70" cy="80" r="1.5" fill="#ece9f8"/>
+        <circle cx="56" cy="85" r="1.8" fill="#a78bfa"/>
+        <circle cx="46" cy="99" r="2.3" fill="#4ed3c2"/>
+        <circle cx="46" cy="44" r="1.6" fill="#ece9f8"/>
+        <circle cx="34" cy="58" r="1.8" fill="#a78bfa"/>
+        <circle cx="28" cy="76" r="2.0" fill="#4ed3c2"/>
+        <circle cx="33" cy="49" r="1.3" fill="#ece9f8"/>
+        <circle cx="29" cy="63" r="1.3" fill="#ece9f8"/>
+        <circle cx="29" cy="80" r="1.3" fill="#ece9f8"/>
+      </g>
+      <circle cx="74" cy="53" r="3" fill="#d9a96c" filter="url(#soft-hero)"/>
+    </svg>
+  </div>
   <div class="hero-inner">
     <p class="kicker">Magic Unicorn · Knowledge-Ops</p>
     <h1>Watch your organization <span class="think">think.</span></h1>
@@ -511,7 +707,7 @@ footer {
     </div>
   </div>
   <p class="hero-readout" aria-label="Summary">
-    <b>one corpus</b><span class="sep">·</span><b>four sources</b><span class="sep">·</span><b>every answer cited</b>
+    <b>one corpus</b><span class="sep">·</span><b>every source charted</b><span class="sep">·</span><b>every answer cited</b>
   </p>
 </section>
 
@@ -557,32 +753,143 @@ footer {
       <!-- 03 GRAPH -->
       <article class="plate">
         <p class="kicker">03 · Graph</p>
-        <h3>The living constellation.</h3>
-        <p>Every source becomes a point of light in one navigable sky &mdash; people, projects, systems, and decisions typed and linked across wiki, memory, meetings, and files. Clusters form around what your organization actually knows.</p>
-        <div class="demo demo-graph" role="img" aria-label="A small constellation diagram: typed entities — page, meeting, person, decision, project — joined by hairline edges">
+        <h3>A sky you can orbit.</h3>
+        <p>The whole corpus hangs in one truly three-dimensional volume &mdash; every entity a point of light, every source with its own glyph, color, and depth band. Drag to orbit, dive into a cluster, and watch what your organization knows hold formation.</p>
+        <div class="demo demo-graph" role="img" aria-label="A small constellation diagram: glyph-coded sources — wiki as circle, meetings as triangle, org memory as diamond, stable docs as square, files as pentagon, graph entities as star — joined by hairline edges">
           <svg viewBox="0 0 320 178" aria-hidden="true">
             <g stroke="rgba(163,156,219,0.3)" stroke-width="1">
               <path d="M52 56 150 34M150 34 248 60M52 56 112 122M112 122 226 134M248 60 226 134M248 60 296 106M52 56 22 114"/>
             </g>
             <g>
               <circle cx="52" cy="56" r="12" fill="#c9b6ff" opacity="0.13"/><circle cx="52" cy="56" r="4.6" fill="#c9b6ff"/>
-              <circle cx="150" cy="34" r="11" fill="#92b5f7" opacity="0.13"/><circle cx="150" cy="34" r="4.2" fill="#92b5f7"/>
-              <circle cx="248" cy="60" r="12" fill="#7fe3d2" opacity="0.13"/><circle cx="248" cy="60" r="4.6" fill="#7fe3d2"/>
-              <circle cx="112" cy="122" r="11" fill="#efc48e" opacity="0.13"/><circle cx="112" cy="122" r="4.2" fill="#efc48e"/>
-              <circle cx="226" cy="134" r="12" fill="#e3a6cf" opacity="0.13"/><circle cx="226" cy="134" r="4.6" fill="#e3a6cf"/>
-              <circle cx="296" cy="106" r="2.6" fill="#a3e8ae"/>
-              <circle cx="22" cy="114" r="2.6" fill="#92b5f7"/>
+              <circle cx="150" cy="34" r="11" fill="#92b5f7" opacity="0.13"/><polygon points="150,28.3 155.2,37.2 144.8,37.2" fill="#92b5f7"/>
+              <circle cx="248" cy="60" r="12" fill="#7fe3d2" opacity="0.13"/><polygon points="248,54.2 253.8,60 248,65.8 242.2,60" fill="#7fe3d2"/>
+              <circle cx="112" cy="122" r="11" fill="#efc48e" opacity="0.13"/><rect x="107.6" y="117.6" width="8.8" height="8.8" fill="#efc48e"/>
+              <circle cx="226" cy="134" r="12" fill="#e3a6cf" opacity="0.13"/><polygon points="226,128.4 231.3,132.3 229.3,138.6 222.7,138.6 220.7,132.3" fill="#e3a6cf"/>
+              <g transform="translate(292.4,102.4) scale(0.6)" fill="#a3e8ae"><polygon points="6,0.6 7.4,4.2 11.4,4.4 8.3,6.9 9.4,10.8 6,8.6 2.6,10.8 3.7,6.9 0.6,4.4 4.6,4.2"/></g>
+              <polygon points="22,110.9 24.7,115.6 19.3,115.6" fill="#92b5f7"/>
             </g>
             <g class="lbl-txt" text-anchor="middle">
-              <text x="52" y="78">PAGE</text>
-              <text x="150" y="20">MEETING</text>
-              <text x="248" y="82">PERSON</text>
-              <text x="112" y="144">DECISION</text>
-              <text x="226" y="156">PROJECT</text>
+              <text x="52" y="78">WIKI</text>
+              <text x="150" y="20">MEETINGS</text>
+              <text x="248" y="82">MEMORY</text>
+              <text x="112" y="144">STABLE</text>
+              <text x="226" y="156">FILES</text>
             </g>
           </svg>
         </div>
       </article>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3D LIVING GRAPH -->
+<section id="graph" aria-labelledby="graph-title">
+  <div class="wrap">
+    <p class="kicker">The sky</p>
+    <h2 class="section-title" id="graph-title">The graph became a place.</h2>
+    <p class="section-lede">The constellation is truly three-dimensional &mdash; one navigable volume of everything the organization knows, on a slow orbit until you take the controls: drag to orbit, shift-drag to pan, scroll to dive.</p>
+
+    <div class="orbit-plate">
+      <div class="orbit-stage">
+        <svg viewBox="0 0 960 300" role="img" aria-label="An orbital view of the knowledge constellation: glyph-coded stars at several depths, three of them ignited with warm rings marking the evidence behind an answer">
+          <defs>
+            <g id="gy-c"><circle r="4.4"/></g>
+            <g id="gy-d"><polygon points="0,-5.2 5.2,0 0,5.2 -5.2,0"/></g>
+            <g id="gy-t"><polygon points="0,-5 5.2,4.4 -5.2,4.4"/></g>
+            <g id="gy-s"><rect x="-4.2" y="-4.2" width="8.4" height="8.4"/></g>
+            <g id="gy-p"><polygon points="0,-5.2 5,-1.4 3.1,4.6 -3.1,4.6 -5,-1.4"/></g>
+            <g id="gy-st"><polygon points="0,-5.4 1.4,-1.8 5.4,-1.6 2.3,0.9 3.4,4.8 0,2.6 -3.4,4.8 -2.3,0.9 -5.4,-1.6 -1.4,-1.8"/></g>
+          </defs>
+
+          <!-- orbit paths -->
+          <ellipse cx="480" cy="152" rx="436" ry="118" fill="none" stroke="rgba(163,156,219,0.15)" stroke-width="1" stroke-dasharray="1 7" stroke-linecap="round"/>
+          <ellipse cx="480" cy="150" rx="298" ry="76" fill="none" stroke="rgba(163,156,219,0.1)" stroke-width="1" stroke-dasharray="1 9" stroke-linecap="round"/>
+
+          <!-- far field -->
+          <g fill="#d7d2f0" opacity="0.38">
+            <circle cx="40" cy="58" r="1.4"/><circle cx="122" cy="140" r="1.2"/><circle cx="200" cy="40" r="1.5"/>
+            <circle cx="330" cy="192" r="1.2"/><circle cx="412" cy="242" r="1.4"/><circle cx="470" cy="94" r="1.2"/>
+            <circle cx="562" cy="44" r="1.4"/><circle cx="612" cy="236" r="1.2"/><circle cx="662" cy="120" r="1.3"/>
+            <circle cx="760" cy="252" r="1.4"/><circle cx="822" cy="44" r="1.5"/><circle cx="906" cy="140" r="1.2"/>
+            <circle cx="932" cy="252" r="1.3"/><circle cx="152" cy="256" r="1.2"/><circle cx="716" cy="154" r="1.2"/>
+            <circle cx="276" cy="134" r="1.2"/>
+          </g>
+
+          <!-- hairline edges -->
+          <g stroke="rgba(163,156,219,0.22)" stroke-width="1" fill="none">
+            <path d="M365 138 253 78M253 78 95 95M253 78 445 58M445 58 585 105M365 138 135 192M135 192 58 222M585 105 737 68M585 105 862 88M862 88 792 182M792 182 695 232M792 182 900 204M505 208 632 166M632 166 695 232M365 138 300 228"/>
+          </g>
+          <!-- ignited edges: the evidence set lights up together -->
+          <g stroke="#d9a96c" stroke-opacity="0.4" stroke-width="1.2" fill="none">
+            <path d="M365 138 585 105M365 138 505 208"/>
+          </g>
+
+          <!-- mid depth band -->
+          <g opacity="0.55">
+            <use href="#gy-d" transform="translate(95 95) scale(0.65)" fill="#7fe3d2"/>
+            <use href="#gy-p" transform="translate(445 58) scale(0.65)" fill="#e3a6cf"/>
+            <use href="#gy-c" transform="translate(632 166) scale(0.65)" fill="#c9b6ff"/>
+            <use href="#gy-t" transform="translate(300 228) scale(0.65)" fill="#92b5f7"/>
+            <use href="#gy-d" transform="translate(737 68) scale(0.65)" fill="#7fe3d2"/>
+            <use href="#gy-c" transform="translate(900 204) scale(0.65)" fill="#c9b6ff"/>
+            <use href="#gy-s" transform="translate(58 222) scale(0.65)" fill="#efc48e"/>
+            <use href="#gy-st" transform="translate(540 262) scale(0.65)" fill="#a3e8ae"/>
+          </g>
+
+          <!-- near band -->
+          <circle cx="253" cy="78" r="12" fill="#c9b6ff" opacity="0.12"/>
+          <use href="#gy-c" transform="translate(253 78)" fill="#c9b6ff"/>
+          <circle cx="135" cy="192" r="14" fill="#e3a6cf" opacity="0.12"/>
+          <use href="#gy-p" transform="translate(135 192) scale(1.2)" fill="#e3a6cf"/>
+          <circle cx="792" cy="182" r="13" fill="#efc48e" opacity="0.12"/>
+          <use href="#gy-s" transform="translate(792 182) scale(1.1)" fill="#efc48e"/>
+          <circle cx="695" cy="232" r="12" fill="#a3e8ae" opacity="0.12"/>
+          <use href="#gy-st" transform="translate(695 232) scale(1.1)" fill="#a3e8ae"/>
+          <circle cx="862" cy="88" r="11" fill="#92b5f7" opacity="0.12"/>
+          <use href="#gy-t" transform="translate(862 88) scale(0.95)" fill="#92b5f7"/>
+
+          <!-- ignition: three evidence stars behind one answer -->
+          <circle cx="365" cy="138" r="26" fill="#c9b6ff" opacity="0.16"/>
+          <use href="#gy-c" transform="translate(365 138) scale(1.5)" fill="#c9b6ff"/>
+          <circle cx="365" cy="138" r="15" fill="none" stroke="#d9a96c" stroke-opacity="0.75" stroke-width="1.3"/>
+          <circle class="ign-ring" cx="365" cy="138" r="23" fill="none" stroke="#d9a96c" stroke-width="1"/>
+
+          <circle cx="585" cy="105" r="20" fill="#92b5f7" opacity="0.14"/>
+          <use href="#gy-t" transform="translate(585 105) scale(1.25)" fill="#92b5f7"/>
+          <circle cx="585" cy="105" r="12" fill="none" stroke="#d9a96c" stroke-opacity="0.7" stroke-width="1.2"/>
+          <circle class="ign-ring ign-ring--late" cx="585" cy="105" r="18" fill="none" stroke="#d9a96c" stroke-width="1"/>
+
+          <circle cx="505" cy="208" r="20" fill="#7fe3d2" opacity="0.14"/>
+          <use href="#gy-d" transform="translate(505 208) scale(1.25)" fill="#7fe3d2"/>
+          <circle cx="505" cy="208" r="12" fill="none" stroke="#d9a96c" stroke-opacity="0.7" stroke-width="1.2"/>
+          <circle class="ign-ring" cx="505" cy="208" r="18" fill="none" stroke="#d9a96c" stroke-width="1"/>
+        </svg>
+      </div>
+
+      <p class="orbit-legend" aria-label="Source coding: every source has a glyph as well as a color">
+        <span class="lg"><i style="color:var(--src-wiki)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><circle cx="6" cy="6" r="4.4"/></svg></i>wiki · circle</span>
+        <span class="lg"><i style="color:var(--src-memory)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><polygon points="6,0.8 11.2,6 6,11.2 0.8,6"/></svg></i>memory · diamond</span>
+        <span class="lg"><i style="color:var(--src-meetings)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><polygon points="6,1 11.2,10.4 0.8,10.4"/></svg></i>meetings · triangle</span>
+        <span class="lg"><i style="color:var(--src-stable)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><rect x="1.8" y="1.8" width="8.4" height="8.4"/></svg></i>stable · square</span>
+        <span class="lg"><i style="color:var(--src-files)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><polygon points="6,0.8 11,4.6 9.1,10.6 2.9,10.6 1,4.6"/></svg></i>files · pentagon</span>
+        <span class="lg"><i style="color:var(--src-graph)"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><polygon points="6,0.6 7.4,4.2 11.4,4.4 8.3,6.9 9.4,10.8 6,8.6 2.6,10.8 3.7,6.9 0.6,4.4 4.6,4.2"/></svg></i>graph · star</span>
+      </p>
+
+      <div class="orbit-rows">
+        <div class="gov-row">
+          <span class="gov-key">Orbit</span>
+          <span class="gov-val"><b>One volume, not a diagram.</b> Every point holds a position in depth &mdash; each source keeps to its own band, so the wiki&rsquo;s steady core sits nearer than passing chatter. The camera is yours: orbit, pan, dive.</span>
+        </div>
+        <div class="gov-row">
+          <span class="gov-key">Glyphs</span>
+          <span class="gov-val"><b>Coded twice, legible anywhere.</b> Every source carries a glyph as well as a color &mdash; so the map survives monochrome screenshots, small screens, and color-blindness alike.</span>
+        </div>
+        <div class="gov-row">
+          <span class="gov-key">Ignition</span>
+          <span class="gov-val"><b>Ask, and the sky answers back.</b> Fire a question and the passages behind the answer ignite in place, across sources. Ignition marks <em>related evidence</em> &mdash; a similarity heuristic, never a verification.</span>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -619,12 +926,58 @@ footer {
   </div>
 </section>
 
-<!-- ========================================================== FOUR SKIES -->
+<!-- ========================================================== AUTOMATE IT -->
+<section id="automate" aria-labelledby="auto-title">
+  <div class="wrap">
+    <p class="kicker">Automate it</p>
+    <h2 class="section-title" id="auto-title">Every read the UI has, your agents have.</h2>
+    <p class="section-lede">Knowledge-Ops is an MCP server as well as an observatory. Point an agent at <span class="mono">/mcp</span> and it can search, ground, read pages, walk history, and dig through files &mdash; under the same scopes, with the same citations.</p>
+
+    <div class="auto-plate">
+      <div class="auto-info">
+        <div class="auto-fact">
+          <b>One endpoint.</b>
+          <p><span class="mono">POST /mcp</span> speaks JSON-RPC 2.0 &mdash; initialize, tools/list, tools/call. Agents discover it at <span class="mono">/.well-known/mcps.json</span>.</p>
+        </div>
+        <div class="auto-fact">
+          <b>Sixteen tools.</b>
+          <p><span class="mono">search &middot; ground &middot; get_doc &middot; doc_history &middot; find_file &middot; deep_read &middot; inspect_citation &hellip;</span> the same reads the Observatory itself runs on.</p>
+        </div>
+        <div class="auto-fact">
+          <b>Same governance.</b>
+          <p>An agent sees exactly what its token may see. Scopes are enforced at query time, every answer carries its citations, and every call lands in the audit trail.</p>
+        </div>
+      </div>
+      <div class="auto-term">
+<pre aria-label="Example JSON-RPC exchange with the /mcp endpoint"><span class="t-dim">$</span> <span class="t-txt">GET /.well-known/mcps.json</span>
+<span class="t-dim">→ knowledge-ops · 16 tools</span>
+
+<span class="t-dim">$</span> <span class="t-txt">POST /mcp</span>
+{ <span class="t-key">"jsonrpc"</span>: <span class="t-str">"2.0"</span>, <span class="t-key">"id"</span>: <span class="t-brass">7</span>,
+  <span class="t-key">"method"</span>: <span class="t-str">"tools/call"</span>,
+  <span class="t-key">"params"</span>: {
+    <span class="t-key">"name"</span>: <span class="t-str">"search"</span>,
+    <span class="t-key">"arguments"</span>: {
+      <span class="t-key">"query"</span>: <span class="t-str">"what is our brand voice?"</span>
+    } } }
+
+<span class="t-dim">→ 200</span>
+{ <span class="t-key">"answer"</span>: <span class="t-str">"Wonder and substance — …"</span>,
+  <span class="t-key">"passages"</span>: [
+    { <span class="t-key">"source"</span>: <span class="t-str">"wiki"</span>,
+      <span class="t-key">"title"</span>: <span class="t-str">"Brand Bible · v1"</span>,
+      <span class="t-key">"score"</span>: <span class="t-brass">0.91</span>, <span class="t-dim">…</span> } ] }</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================== FIVE SKIES -->
 <section id="skies" aria-labelledby="themes-title">
   <div class="wrap">
     <p class="kicker">Appearance</p>
-    <h2 class="section-title" id="themes-title">One instrument, four skies.</h2>
-    <p class="section-lede">Same glass, four calibrated palettes &mdash; Aurora by default, Daylight for the chart room, Nebula for the demo reel, Midnight for lights out.</p>
+    <h2 class="section-title" id="themes-title">One instrument, five skies.</h2>
+    <p class="section-lede">Same glass, five calibrated palettes &mdash; Aurora by default, Daylight for the warm chart room, Porcelain for the cool gallery, Nebula for the demo reel, Midnight for lights out. Real values, straight from the token sheet.</p>
 
     <div class="skies">
       <div class="sw sw--aurora">
@@ -636,6 +989,13 @@ footer {
           </svg>
           <span class="sw-lbl">Aurora</span><span class="sw-chip" aria-hidden="true"></span></div>
         <p class="sw-name"><b>Aurora</b> <span>dark · default</span></p>
+        <ul class="sw-spec" role="list" aria-label="Aurora token values">
+          <li><i style="--c:#070512"></i>bg<code>#070512</code></li>
+          <li><i style="--c:#ece9f8"></i>text<code>#ece9f8</code></li>
+          <li><i style="--c:#a78bfa"></i>primary<code>#a78bfa</code></li>
+          <li><i style="--c:#4ed3c2"></i>accent<code>#4ed3c2</code></li>
+          <li><i style="--c:#d9a96c"></i>brass<code>#d9a96c</code></li>
+        </ul>
       </div>
       <div class="sw sw--daylight">
         <div class="sw-sky" role="img" aria-label="Daylight theme preview: ink points on cool paper">
@@ -645,7 +1005,31 @@ footer {
             <circle cx="28" cy="30" r="2.6" fill="#6d4fd8"/><circle cx="62" cy="18" r="1.9" fill="#0f8d7f"/><circle cx="98" cy="40" r="2.5" fill="#3b64c0"/><circle cx="48" cy="68" r="1.9" fill="#a96f1e"/><circle cx="122" cy="74" r="2.3" fill="#b0508f"/><circle cx="141" cy="26" r="1.5" fill="#0f8d7f"/><circle cx="14" cy="84" r="1.5" fill="#3b64c0"/><circle cx="78" cy="90" r="1.3" fill="#6d4fd8"/>
           </svg>
           <span class="sw-lbl">Daylight</span><span class="sw-chip" aria-hidden="true"></span></div>
-        <p class="sw-name"><b>Daylight</b> <span>ink on paper</span></p>
+        <p class="sw-name"><b>Daylight</b> <span>warm · paper</span></p>
+        <ul class="sw-spec" role="list" aria-label="Daylight token values">
+          <li><i style="--c:#f4f2ed"></i>bg<code>#f4f2ed</code></li>
+          <li><i style="--c:#1b1730"></i>text<code>#1b1730</code></li>
+          <li><i style="--c:#6d4fd8"></i>primary<code>#6d4fd8</code></li>
+          <li><i style="--c:#0f8d7f"></i>accent<code>#0f8d7f</code></li>
+          <li><i style="--c:#8a5f2d"></i>brass<code>#8a5f2d</code></li>
+        </ul>
+      </div>
+      <div class="sw sw--porcelain">
+        <div class="sw-sky" role="img" aria-label="Porcelain theme preview: soft ink points on cool gallery white">
+          <svg viewBox="0 0 160 105" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+            <g stroke="rgba(74,67,112,0.22)" stroke-width="0.8"><path d="M28 30 62 18M62 18 98 40M98 40 122 74M28 30 48 68M98 40 141 26" fill="none"/></g>
+            <circle cx="28" cy="30" r="10" fill="#6b4fd0" opacity="0.09"/><circle cx="98" cy="40" r="10" fill="#3961b8" opacity="0.09"/><circle cx="122" cy="74" r="9" fill="#a94f8a" opacity="0.09"/>
+            <circle cx="28" cy="30" r="2.6" fill="#6b4fd0"/><circle cx="62" cy="18" r="1.9" fill="#0e9488"/><circle cx="98" cy="40" r="2.5" fill="#3961b8"/><circle cx="48" cy="68" r="1.9" fill="#a06a20"/><circle cx="122" cy="74" r="2.3" fill="#a94f8a"/><circle cx="141" cy="26" r="1.5" fill="#0e9488"/><circle cx="14" cy="84" r="1.5" fill="#3961b8"/><circle cx="78" cy="90" r="1.3" fill="#6b4fd0"/>
+          </svg>
+          <span class="sw-lbl">Porcelain</span><span class="sw-chip" aria-hidden="true"></span></div>
+        <p class="sw-name"><b>Porcelain</b> <span>cool · gallery</span></p>
+        <ul class="sw-spec" role="list" aria-label="Porcelain token values">
+          <li><i style="--c:#f7f8fa"></i>bg<code>#f7f8fa</code></li>
+          <li><i style="--c:#16151d"></i>text<code>#16151d</code></li>
+          <li><i style="--c:#6b4fd0"></i>primary<code>#6b4fd0</code></li>
+          <li><i style="--c:#0e9488"></i>accent<code>#0e9488</code></li>
+          <li><i style="--c:#6e6a7e"></i>brass<code>#6e6a7e</code></li>
+        </ul>
       </div>
       <div class="sw sw--nebula">
         <div class="sw-sky" role="img" aria-label="Nebula theme preview: saturated deep space with maximum glow">
@@ -656,6 +1040,13 @@ footer {
           </svg>
           <span class="sw-lbl">Nebula</span><span class="sw-chip" aria-hidden="true"></span></div>
         <p class="sw-name"><b>Nebula</b> <span>maximum glow</span></p>
+        <ul class="sw-spec" role="list" aria-label="Nebula token values">
+          <li><i style="--c:#0a0420"></i>bg<code>#0a0420</code></li>
+          <li><i style="--c:#f2ecff"></i>text<code>#f2ecff</code></li>
+          <li><i style="--c:#c4a0ff"></i>primary<code>#c4a0ff</code></li>
+          <li><i style="--c:#2de0c8"></i>accent<code>#2de0c8</code></li>
+          <li><i style="--c:#f0b36c"></i>brass<code>#f0b36c</code></li>
+        </ul>
       </div>
       <div class="sw sw--midnight">
         <div class="sw-sky" role="img" aria-label="Midnight theme preview: true black with faint points">
@@ -666,6 +1057,13 @@ footer {
           </svg>
           <span class="sw-lbl">Midnight</span><span class="sw-chip" aria-hidden="true"></span></div>
         <p class="sw-name"><b>Midnight</b> <span>lights out</span></p>
+        <ul class="sw-spec" role="list" aria-label="Midnight token values">
+          <li><i style="--c:#000000"></i>bg<code>#000000</code></li>
+          <li><i style="--c:#dcdae6"></i>text<code>#dcdae6</code></li>
+          <li><i style="--c:#8f7edc"></i>primary<code>#8f7edc</code></li>
+          <li><i style="--c:#46b3a6"></i>accent<code>#46b3a6</code></li>
+          <li><i style="--c:#a8895d"></i>brass<code>#a8895d</code></li>
+        </ul>
       </div>
     </div>
   </div>
@@ -678,11 +1076,30 @@ footer {
   <div class="wrap">
     <div class="foot-row">
       <span class="foot-brand">
-        <svg viewBox="0 0 32 32" aria-hidden="true">
-          <circle cx="16" cy="16" r="4.4" fill="#c9b6ff"/>
-          <circle cx="26" cy="8" r="2.1" fill="#7fe3d2"/>
-          <circle cx="6" cy="24" r="2.1" fill="#92b5f7"/>
-          <path d="M16 16 26 8M16 16 6 24" stroke="#c9b6ff" stroke-opacity=".45" stroke-width="1"/>
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <g stroke="#8f86c9" stroke-opacity="0.55" stroke-width="3" fill="none" stroke-linecap="round">
+            <path d="M66 34 88 10M74 40 88 10M66 34 74 40"/>
+            <path d="M60 36 54 24 66 32"/>
+            <path d="M66 34 72 46 90 52 100 60 96 68 84 71"/>
+            <path d="M84 71 70 80 56 85"/>
+            <path d="M60 36 46 44 34 58 28 76 46 99"/>
+            <path d="M56 85 46 99"/>
+            <path d="M46 44 33 49M43 58 29 63M40 72 29 80"/>
+          </g>
+          <g fill="#ece9f8">
+            <circle cx="88" cy="10" r="7" fill="#4ed3c2"/>
+            <circle cx="66" cy="34" r="5.2" fill="#a78bfa"/>
+            <circle cx="74" cy="40" r="4.4"/>
+            <circle cx="54" cy="24" r="5" fill="#a78bfa"/>
+            <circle cx="90" cy="52" r="4.8" fill="#a78bfa"/>
+            <circle cx="100" cy="60" r="6.2" fill="#4ed3c2"/>
+            <circle cx="84" cy="71" r="4.8" fill="#a78bfa"/>
+            <circle cx="56" cy="85" r="4.8" fill="#a78bfa"/>
+            <circle cx="46" cy="99" r="6" fill="#4ed3c2"/>
+            <circle cx="34" cy="58" r="4.8" fill="#a78bfa"/>
+            <circle cx="28" cy="76" r="5.2" fill="#4ed3c2"/>
+            <circle cx="74" cy="53" r="6.4" fill="#d9a96c"/>
+          </g>
         </svg>
         Magic Unicorn Unconventional Technology &amp; Stuff
       </span>

@@ -654,7 +654,12 @@ button.item { cursor: pointer; }
   .dock {
     left: 50%; top: auto; bottom: 5.35rem; translate: -50% 0;
     flex-direction: row;
+    max-width: calc(100vw - 1.4rem);
+    overflow-x: auto;
+    scrollbar-width: none; /* 9 buttons × 44px can exceed narrow phones — the strip scrolls, targets stay full-size */
   }
+  .dock::-webkit-scrollbar { display: none; }
+  .dock__btn { flex: none; }
   .dock__btn::before { display: none; }
   .main { padding: calc(var(--mu-bar-h) + .9rem) .8rem 10.5rem .8rem; }
   html[data-route="home"] .main, html[data-route="graph"] .main { padding-left: .8rem; }

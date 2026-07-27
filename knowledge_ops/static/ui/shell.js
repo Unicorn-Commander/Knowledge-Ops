@@ -178,6 +178,8 @@ async function boot() {
   // The sky first (views read ctx.sky at init), then the lens, then chrome.
   ctx.sky = initSky($("#sky"), ctx);
   ctx.lens = mountLens($("#lensHost"), ctx);
+  // Hints: one delegated tooltip layer for every [data-hint] in the app.
+  import("./hints.js").then((m) => m.mountHints(document)).catch(() => { /* optional */ });
   const themeHost = $("#themeMenuHost");
   if (themeHost) mountThemeMenu(themeHost, bus);
   wireReadout();

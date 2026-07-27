@@ -2,7 +2,9 @@
 
 The shim is what makes Brigade *brokered execution* work (initialize/tools/list/
 tools/call), and the JWT gate is what keeps a proxy-whitelisted /mcp from
-re-opening anonymous tool calls. Both are covered here alongside the existing 12.
+re-opening anonymous tool calls. Both are covered here alongside the 16 tools
+(the original 12 plus the graph/links/stats/whoami read-parity tools that give
+agents the same view the Observatory UI renders).
 """
 from __future__ import annotations
 
@@ -26,11 +28,12 @@ def _client(tmp_path, monkeypatch) -> TestClient:
 
 
 # ---------------- GUI ----------------
-def test_root_redirects_to_ui(tmp_path, monkeypatch):
+def test_root_redirects_to_landing(tmp_path, monkeypatch):
+    # v3: the public landing is the front door; "Open the Observatory" leads to /ui.
     with _client(tmp_path, monkeypatch) as c:
         r = c.get("/", follow_redirects=False)
         assert r.status_code in (307, 308)
-        assert r.headers["location"].rstrip("/").endswith("/ui")
+        assert r.headers["location"].rstrip("/").endswith("/landing")
 
 
 def test_ui_static_is_served_on_brand(tmp_path, monkeypatch):
@@ -124,6 +127,9 @@ def test_mcp_initialize(tmp_path, monkeypatch):
 
 def test_mcp_tools_list_matches_manifest(tmp_path, monkeypatch):
     manifest_tools = {t["name"] for t in json.loads(MANIFEST.read_text())["tools"]}
+    # 12 originals + the graph/links/stats/whoami read-parity tools.
+    assert len(manifest_tools) == 16, manifest_tools
+    assert {"graph", "links", "stats", "whoami"} <= manifest_tools
     with _client(tmp_path, monkeypatch) as c:
         r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         assert r.status_code == 200
@@ -179,6 +185,157 @@ def test_mcp_unknown_method(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 6, "method": "frobnicate"})
         assert r.status_code == 200 and r.json()["error"]["code"] == -32601
+
+
+# ---------------- read-parity tools: graph / links / stats / whoami ----------------
+@pytest.fixture()
+def fresh_graph_caches():
+    """graph_api caches are process-global and keyed by visibility identity, not
+    db path — clear around each test so a prior tmp db never leaks through."""
+    import knowledge_ops.graph_api as graph_api
+
+    graph_api.invalidate_link_caches()
+    yield
+    graph_api.invalidate_link_caches()
+
+
+def _call_tool(c, name, arguments, req_id=100, headers=None):
+    return c.post("/mcp", json={
+        "jsonrpc": "2.0", "id": req_id, "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    }, headers=headers or {})
+
+
+def test_mcp_tools_call_graph_matches_http_payload(tmp_path, monkeypatch, fresh_graph_caches):
+    import knowledge_ops.config as config
+
+    monkeypatch.setattr(config.settings, "enable_qdrant", False)
+    monkeypatch.setattr(config.settings, "enable_falkordb", False)
+    with _client(tmp_path, monkeypatch) as c:
+        r = _call_tool(c, "graph", {"scope": "global", "limit_per_coll": 25})
+        assert r.status_code == 200
+        result = r.json()["result"]
+        assert result["isError"] is False
+        payload = result["structuredContent"]
+        assert set(payload) == {"nodes", "edges", "stats"}
+        assert payload["stats"]["scope"] == "global"
+        assert payload["stats"]["node_count"] == len(payload["nodes"])
+        # Byte-for-byte the constellation payload the UI fetches for the same
+        # principal (both paths share the per-visibility-identity cache).
+        assert payload == c.get("/kb.graph", params={"scope": "global"}).json()
+
+
+def test_mcp_tools_call_links_reflects_wiki_links(tmp_path, monkeypatch, fresh_graph_caches):
+    with _client(tmp_path, monkeypatch) as c:
+        docs = (
+            ("guides/alpha.md", "# Alpha\n\nSee [[Beta]] and [[Nowhere Doc]]."),
+            ("guides/beta.md", "# Beta\n\nBeta body."),
+        )
+        for i, (path, md) in enumerate(docs):
+            r = _call_tool(c, "upsert_doc", {"path": path, "md": md, "scope": "global"}, req_id=110 + i)
+            assert r.json()["result"]["isError"] is False
+        r = _call_tool(c, "links", {}, req_id=112)
+        assert r.status_code == 200
+        payload = r.json()["result"]["structuredContent"]
+        assert set(payload) == {"links", "missing", "orphans", "count"}
+        assert payload["count"] == len(payload["links"])
+        pairs = {(link["from_path"], link["to_path"]) for link in payload["links"]}
+        assert ("guides/alpha.md", "guides/beta.md") in pairs
+        assert {"from_path": "guides/alpha.md", "target": "Nowhere Doc"} in payload["missing"]
+        assert "guides/alpha.md" in payload["orphans"]
+        assert "guides/beta.md" not in payload["orphans"]
+        # Same payload as GET /kb.links (writes through MCP invalidated the
+        # link caches, so both paths see the just-upserted docs).
+        assert payload == c.get("/kb.links").json()
+
+
+def test_mcp_tools_call_stats_counts_sources(tmp_path, monkeypatch, fresh_graph_caches):
+    import knowledge_ops.config as config
+
+    monkeypatch.setattr(config.settings, "enable_qdrant", False)
+    monkeypatch.setattr(config.settings, "enable_falkordb", False)
+    with _client(tmp_path, monkeypatch) as c:
+        r = _call_tool(c, "stats", {}, req_id=120)
+        assert r.status_code == 200
+        result = r.json()["result"]
+        assert result["isError"] is False
+        sources = result["structuredContent"]["sources"]
+        by_key = {s["key"]: s for s in sources}
+        # the lifespan seeds one wiki doc from disk, so counts are non-trivial
+        assert by_key["wiki"]["kind"] == "canonical" and by_key["wiki"]["count"] >= 1
+        assert {"file_index", "metrics"} <= set(by_key)
+        for source in sources:
+            assert set(source) == {"key", "label", "count", "kind"}
+        assert result["structuredContent"] == c.get("/kb.stats").json()
+
+
+def test_mcp_tools_call_whoami_matches_kb_me(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as c:
+        r = _call_tool(c, "whoami", {}, req_id=130)
+        assert r.status_code == 200
+        result = r.json()["result"]
+        assert result["isError"] is False
+        payload = result["structuredContent"]
+        assert set(payload) == {"name", "scopes", "is_admin"}
+        assert payload["name"] == "local-system" and payload["is_admin"] is True
+        assert payload["scopes"] == sorted(payload["scopes"])
+        assert payload == c.get("/kb.me").json()
+
+
+def test_mcp_read_parity_tools_enforce_the_same_principal(tmp_path, monkeypatch, fresh_graph_caches):
+    """Under an enforced Brigade JWT the new read tools resolve the same
+    principal as the HTTP endpoints: whoami reflects the verified token and
+    needs no scope; graph/links/stats sit behind read:knowledge exactly like
+    their HTTP twins; scope=all stays admin-only through the MCP path too."""
+    import jwt as pyjwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    import knowledge_ops.brigade_auth as ba
+    import knowledge_ops.config as config
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pub_jwk = json.loads(pyjwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    pub_jwk.update({"kid": "test-kid", "alg": "RS256", "use": "sig"})
+    monkeypatch.setattr(ba, "_fetch_jwks", lambda: {"test-kid": pub_jwk})
+    monkeypatch.setattr(ba, "_jwks_keys", {}, raising=False)
+    monkeypatch.setattr(ba, "_jwks_fetched_at", 0.0, raising=False)
+    monkeypatch.setattr(config.settings, "mcp_require_jwt", True)
+    monkeypatch.setattr(config.settings, "mcp_trusted_issuers", ["https://brigade.magicunicorn.dev"])
+
+    def mint(scope="read:knowledge"):
+        now = int(time.time())
+        claims = {"iss": "https://brigade.magicunicorn.dev", "aud": "knowledge-ops",
+                  "sub": "jason", "iat": now, "exp": now + 300}
+        if scope:
+            claims["scope"] = scope
+        return pyjwt.encode(claims, key, algorithm="RS256", headers={"kid": "test-kid"})
+
+    with _client(tmp_path, monkeypatch) as c:
+        # whoami works without any scope and reflects the token, not local-system
+        r = _call_tool(c, "whoami", {}, req_id=140,
+                       headers={"Authorization": f"Bearer {mint(scope='')}"})
+        assert r.status_code == 200
+        body = r.json()["result"]["structuredContent"]
+        assert body["name"] == "jason" and body["is_admin"] is False
+        # the other read tools stay behind read:knowledge, like GET /kb.*
+        for name in ("graph", "links", "stats"):
+            denied = _call_tool(c, name, {}, req_id=141,
+                                headers={"Authorization": f"Bearer {mint(scope='')}"})
+            assert denied.status_code == 403, name
+            assert denied.json()["error"]["code"] == -32003
+        # a reader may call links...
+        ok = _call_tool(c, "links", {}, req_id=142,
+                        headers={"Authorization": f"Bearer {mint()}"})
+        assert ok.status_code == 200 and ok.json()["result"]["isError"] is False
+        # ...but scope=all remains admin-only inside the shared implementation
+        # (surfaced as a sanitized MCP tool error, mirroring HTTP's 403).
+        forbidden = _call_tool(c, "links", {"scope": "all"}, req_id=143,
+                               headers={"Authorization": f"Bearer {mint()}"})
+        assert forbidden.status_code == 200
+        result = forbidden.json()["result"]
+        assert result["isError"] is True
+        assert "AuthorizationError" in result["content"][0]["text"]
+        assert "administrator" not in result["content"][0]["text"]  # sanitized receipt
 
 
 def test_mcp_jwt_gate_blocks_anonymous_tools_call_when_enforced(tmp_path, monkeypatch):

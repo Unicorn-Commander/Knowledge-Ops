@@ -93,6 +93,17 @@ class Settings(BaseModel):
     falkordb_url: str = os.getenv("KNOWLEDGE_OPS_FALKORDB_URL", "redis://unicorn-falkordb:6379")
     falkordb_graph: str = os.getenv("KNOWLEDGE_OPS_FALKORDB_GRAPH", "brigade_global")
 
+    # Unicorn Brigade Guide proxy (/kb.guide.*): entitled KO users chat with
+    # Brigade agents through us. The key is a secret — it travels upstream as
+    # X-API-Key only and must never appear in a response body or log line.
+    # Empty key = Guide not configured (the endpoints answer 503).
+    brigade_url: str = os.getenv("KNOWLEDGE_OPS_BRIGADE_URL", "http://unicorn-brigade:8100")
+    brigade_key: str = os.getenv("KNOWLEDGE_OPS_BRIGADE_KEY", "")
+    brigade_agent: str = os.getenv("KNOWLEDGE_OPS_BRIGADE_AGENT", "")
+    # Brigade's list endpoint doesn't surface accessPolicy.key_names grants, so
+    # deployments name the granted agents explicitly for the picker.
+    brigade_agents: str = os.getenv("KNOWLEDGE_OPS_BRIGADE_AGENTS", "")
+
     enable_qdrant: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_QDRANT", "0") == "1"
     enable_center_deep: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_CENTER_DEEP", "0") == "1"
     enable_falkordb: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_FALKORDB", "0") == "1"

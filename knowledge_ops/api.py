@@ -600,6 +600,11 @@ def kb_openwiki_reject(id: str, req: OpenWikiReviewRequest, principal: ApiPrinci
 
 # Constellation graph/stats/identity endpoints (kb.graph, kb.stats, kb.me).
 app.include_router(graph_api.router)
+try:  # the Guide (Brigade proxy) is optional — a deployment without it still boots
+    from . import guide_api
+    app.include_router(guide_api.router)
+except Exception as _guide_exc:  # pragma: no cover - absent module / bad config
+    logging.getLogger(__name__).info("guide api not mounted: %s", _guide_exc)
 
 
 # Web GUI — served by this app itself (no build step, no CDN). Mounted last so it

@@ -191,6 +191,53 @@
         "properties": {"name": {"type": "string"}, "value": {"type": "number"}, "tags": {"type": "object"}},
         "required": ["name", "value"]
       }
+    },
+    {
+      "name": "graph",
+      "description": "The constellation graph the Observatory UI renders: sampled nodes plus semantic and wiki-link edges across enabled stores, visibility-filtered for the calling principal. Same payload as GET /kb.graph.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.graph"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "scope": {"type": "string", "description": "Optional visibility filter: global|personal|all|workspace:<id>. Omission derives visible knowledge from the verified identity; all requires knowledge-admin."},
+          "limit_per_coll": {"type": "integer", "default": 100, "description": "Node sample size per collection (clamped to 1-200)."}
+        }
+      }
+    },
+    {
+      "name": "links",
+      "description": "The wiki-link index: resolved doc-to-doc links, missing red-link targets, and orphan docs for the caller-visible wiki slice. Same payload as GET /kb.links.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.links"},
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "scope": {"type": "string", "description": "Optional visibility filter: global|personal|all|workspace:<id>."}
+        }
+      }
+    },
+    {
+      "name": "stats",
+      "description": "Per-source record counts across the federated stores (semantic collections, wiki, file index, metrics, graph stores). Same payload as GET /kb.stats.",
+      "scopes_required": ["read:knowledge"],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.stats"},
+      "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+      "name": "whoami",
+      "description": "The calling principal's verified identity: name, sorted scopes, and is_admin. Needs no scope — any authenticated principal may introspect itself. Same payload as GET /kb.me.",
+      "scopes_required": [],
+      "tier_required": "free",
+      "read_only": true,
+      "rest": {"method": "GET", "path": "/kb.me"},
+      "input_schema": {"type": "object", "properties": {}}
     }
   ],
   "resources": [

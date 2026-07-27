@@ -56,7 +56,7 @@ function sparklineSvg(values, w = 240, h = 44) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   const last = pts.split(" ").pop();
-  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="trend of last ${nums.length} values" preserveAspectRatio="none" style="max-width:100%;display:block;">
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="trend of last ${nums.length} values" data-hint="Trend of the loaded points, oldest to newest — drawn locally from the values in the table below." preserveAspectRatio="none" style="max-width:100%;display:block;">
     <polyline points="${pts}" fill="none" stroke="var(--mu-color-accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
     <circle cx="${last.split(",")[0]}" cy="${last.split(",")[1]}" r="2.5" fill="var(--mu-color-primary)"></circle>
   </svg>`;
@@ -87,6 +87,7 @@ function injectStyles() {
   #view-ops .tablewrap { margin: .3rem 0; }
   #view-ops .ops-metricrow { display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap; }
   #view-ops .ops-metricrow[hidden] { display: none !important; }
+  #view-ops .ops-about { font-size: .8rem; margin: -.5rem 0 1.1rem; }
   `;
   document.head.appendChild(st);
 }
@@ -100,11 +101,12 @@ export function init(section, ctx) {
     <p class="kicker">Service</p>
     <h1 class="title">Operations</h1>
     <p class="lede">Watch the memory machinery: metrics, refresh cadence, deletion propagation, and the audit trail.</p>
+    <p class="dim ops-about">About this view — service metrics for everyone, plus the admin machinery: refresh cadence, deletion propagation, and the audit trail. <a href="#help">Learn more</a></p>
 
     <div class="ops-quiet" role="search" aria-label="Metric explorer">
       <div class="field field--grow">
         <label class="lbl" for="opsMetricName">Metric name</label>
-        <input class="input mono" id="opsMetricName" placeholder="e.g. qwen.orchestrator.plan_seconds" />
+        <input class="input mono" id="opsMetricName" data-hint-title="Metric explorer" data-hint="Renders any recorded service metric by exact name — latest value, recent table, and a trend of up to 120 points." placeholder="e.g. qwen.orchestrator.plan_seconds" />
       </div>
       <button type="button" class="btn btn--primary field-action" id="opsMetricBtn" style="min-height:44px;">Render</button>
     </div>
@@ -148,14 +150,14 @@ export function init(section, ctx) {
       const latest = metrics[metrics.length - 1];
       metricBox.innerHTML = `
         <div class="ops-metricrow">
-          <div class="stat">
+          <div class="stat" data-hint="Most recent recorded value of this metric, with how many points were loaded (up to 120).">
             <span class="stat__n">${esc(Number(latest.value).toFixed(3))}</span>
             <span class="stat__l">latest · ${metrics.length} points</span>
           </div>
           ${spark}
         </div>
         <h2 class="section">Recent values</h2>
-        <div class="tablewrap"><table class="ops-table">
+        <div class="tablewrap"><table class="ops-table" aria-label="Recent metric values">
           <thead><tr><th>Value</th><th>Tags</th><th>Recorded</th></tr></thead>
           <tbody>${metrics.slice(-20).reverse().map((m) => `
             <tr>
@@ -183,21 +185,21 @@ export function init(section, ctx) {
 
   adminArea.innerHTML = `
     <p class="kicker">Machinery</p>
-    <div class="grid grid--3 ops-stats" id="opsStats" aria-live="polite">${LOADING}</div>
+    <div class="grid grid--3 ops-stats" id="opsStats" aria-live="polite" aria-label="Operational counters">${LOADING}</div>
 
     <div class="section-row" style="margin-top:1.4rem;">
       <div>
         <p class="kicker">Refresh</p>
         <h2 class="section section--flush">Jobs and runs</h2>
       </div>
-      <button type="button" class="btn btn--sm" id="opsRefreshDue">Run due</button>
+      <button type="button" class="btn btn--sm" id="opsRefreshDue" data-hint="Dispatches every enabled job whose next run is due now. Runs execute in the scheduler worker and are recorded in the audit trail.">Run due</button>
     </div>
     <div class="ops-form">
-      <div><label class="lbl" for="opsJobId">Job ID</label><input class="input mono" id="opsJobId" value="wiki-review" /></div>
-      <div><label class="lbl" for="opsJobKind">Kind</label><select class="select" id="opsJobKind"><option value="review_scan">Review scan</option><option value="connector_refresh">Connector refresh</option></select></div>
-      <div><label class="lbl" for="opsJobSource">Source</label><input class="input mono" id="opsJobSource" value="wiki" /></div>
-      <div><label class="lbl" for="opsJobInterval">Interval (seconds)</label><input class="input" id="opsJobInterval" type="number" min="60" max="31536000" step="60" value="86400" /></div>
-      <button type="button" class="btn btn--primary ops-form__action" id="opsJobSave">Save job</button>
+      <div><label class="lbl" for="opsJobId">Job ID</label><input class="input mono" id="opsJobId" data-hint="Stable name for the scheduled job — saving an existing ID updates that job in place." value="wiki-review" /></div>
+      <div><label class="lbl" for="opsJobKind">Kind</label><select class="select" id="opsJobKind" data-hint-title="Job kind" data-hint="review_scan runs the staleness and conflict scan · connector_refresh re-pulls a federated source into the index."><option value="review_scan">Review scan</option><option value="connector_refresh">Connector refresh</option></select></div>
+      <div><label class="lbl" for="opsJobSource">Source</label><input class="input mono" id="opsJobSource" data-hint="Which source the job targets (e.g. wiki) — connector_refresh uses it to pick the adapter." value="wiki" /></div>
+      <div><label class="lbl" for="opsJobInterval">Interval (seconds)</label><input class="input" id="opsJobInterval" type="number" min="60" max="31536000" step="60" data-hint="Seconds between runs — 86400 is daily. Minimum 60, maximum one year." value="86400" /></div>
+      <button type="button" class="btn btn--primary ops-form__action" id="opsJobSave" data-hint="Creates or updates this scheduled job and enables it immediately — the next due tick will run it.">Save job</button>
     </div>
     <div class="grid grid--2 ops-grid">
       <div><h3 class="subhead">Jobs</h3><div id="opsJobs" aria-live="polite">${LOADING}</div></div>
@@ -207,8 +209,8 @@ export function init(section, ctx) {
       <div><h3 class="subhead">Scheduler worker</h3><div class="list" id="opsWorker" aria-live="polite">${LOADING}</div></div>
       <div><h3 class="subhead">Deletion propagation</h3><div class="list" id="opsOutbox" aria-live="polite">${LOADING}</div></div>
     </div>
-    <h2 class="section">Audit trail</h2>
-    <div id="opsAudit" aria-live="polite">${LOADING}</div>`;
+    <h2 class="section" data-hint-title="Audit trail" data-hint="Append-only record of state-changing actions — approvals, refresh dispatches, deletions — with actor, resource, and outcome.">Audit trail</h2>
+    <div id="opsAudit" aria-live="polite" aria-label="Audit trail">${LOADING}</div>`;
 
   const statsBox = adminArea.querySelector("#opsStats");
   const jobsBox = adminArea.querySelector("#opsJobs");
@@ -225,26 +227,26 @@ export function init(section, ctx) {
     return false;
   }
 
-  const runPill = (status) => `<span class="pill run--${esc(String(status || "unknown"))}">${esc(status || "unknown")}</span>`;
+  const runPill = (status) => `<span class="pill run--${esc(String(status || "unknown"))}" data-hint="Status reported by the scheduler worker.">${esc(status || "unknown")}</span>`;
 
-  const stat = (n, label) =>
-    `<div class="stat"><span class="stat__n">${esc(Number(n).toLocaleString())}</span><span class="stat__l">${esc(label)}</span></div>`;
+  const stat = (n, label, hint) =>
+    `<div class="stat"${hint ? ` data-hint="${esc(hint)}"` : ""}><span class="stat__n">${esc(Number(n).toLocaleString())}</span><span class="stat__l">${esc(label)}</span></div>`;
 
   async function loadRefresh() {
     try {
       const data = await api.get("/kb.refresh_jobs");
       const jobs = data.jobs || [], runs = data.runs || [];
-      jobsBox.innerHTML = jobs.length ? `<div class="tablewrap"><table class="ops-table">
+      jobsBox.innerHTML = jobs.length ? `<div class="tablewrap"><table class="ops-table" aria-label="Refresh jobs">
         <thead><tr><th>Job</th><th>Kind · source</th><th>Cadence</th><th>State</th></tr></thead>
         <tbody>${jobs.map((job) => `
           <tr>
             <td class="mono">${esc(job.job_id)}</td>
-            <td class="mono dim">${esc(job.kind)} · ${esc(job.source_ref)}</td>
-            <td class="mono">${esc(job.interval_seconds)}s</td>
-            <td><span class="pill ${job.enabled ? "pill--ok" : "pill--off"}">${job.enabled ? "enabled" : "paused"}</span></td>
+            <td class="mono dim" data-hint="Job kind and its target — review_scan is the memory quality scan; connector_refresh re-pulls that source.">${esc(job.kind)} · ${esc(job.source_ref)}</td>
+            <td class="mono" data-hint="How often the scheduler dispatches this job, in seconds.">${esc(job.interval_seconds)}s</td>
+            <td><span class="pill ${job.enabled ? "pill--ok" : "pill--off"}" data-hint="enabled = dispatched on cadence by the scheduler · paused = kept on file but never dispatched.">${job.enabled ? "enabled" : "paused"}</span></td>
           </tr>`).join("")}</tbody>
       </table></div>` : `<div class="empty">No refresh jobs yet — the machinery is idle by choice, not neglect.</div>`;
-      runsBox.innerHTML = runs.length ? `<div class="tablewrap"><table class="ops-table">
+      runsBox.innerHTML = runs.length ? `<div class="tablewrap"><table class="ops-table" aria-label="Recent refresh runs">
         <thead><tr><th>Run</th><th>Job</th><th>Status</th><th>Scheduled</th></tr></thead>
         <tbody>${runs.map((run) => `
           <tr>
@@ -266,24 +268,24 @@ export function init(section, ctx) {
       const refresh = data.refresh || {};
       const outbox = data.deletion_outbox || {};
       const stats = [];
-      if (Number.isFinite(Number(refresh.succeeded))) stats.push(stat(refresh.succeeded, "runs succeeded"));
-      if (Number.isFinite(Number(refresh.failed))) stats.push(stat(refresh.failed, "runs failed"));
-      if (Number.isFinite(Number(outbox.pending))) stats.push(stat(outbox.pending, "deletions pending"));
-      if (Number.isFinite(Number(outbox.failed))) stats.push(stat(outbox.failed, "deletions failed"));
-      if (Number.isFinite(Number(outbox.succeeded))) stats.push(stat(outbox.succeeded, "deletions propagated"));
-      if (Number.isFinite(Number(readiness.fresh_running_workers))) stats.push(stat(readiness.fresh_running_workers, "workers active"));
+      if (Number.isFinite(Number(refresh.succeeded))) stats.push(stat(refresh.succeeded, "runs succeeded", "Refresh runs that completed cleanly, as reported by the scheduler."));
+      if (Number.isFinite(Number(refresh.failed))) stats.push(stat(refresh.failed, "runs failed", "Refresh runs that errored — find the run in Recent runs to see which job."));
+      if (Number.isFinite(Number(outbox.pending))) stats.push(stat(outbox.pending, "deletions pending", "Tombstoned memories still waiting to propagate to their source owners. A healthy value trends to zero."));
+      if (Number.isFinite(Number(outbox.failed))) stats.push(stat(outbox.failed, "deletions failed", "Propagations that used every allowed attempt — retry them from the Deletion propagation panel."));
+      if (Number.isFinite(Number(outbox.succeeded))) stats.push(stat(outbox.succeeded, "deletions propagated", "Tombstones fully delivered to their source owners — the forget signal completed."));
+      if (Number.isFinite(Number(readiness.fresh_running_workers))) stats.push(stat(readiness.fresh_running_workers, "workers active", "Scheduler workers holding a fresh heartbeat right now."));
       statsBox.innerHTML = stats.length ? stats.join("") : `<div class="empty">No operational counters reported.</div>`;
 
       workerBox.innerHTML = worker ? `
         <div class="item">
           <div style="min-width:0;"><div class="item__title">${esc(worker.worker_kind)}</div><div class="item__sub">heartbeat ${fmtTime(worker.heartbeat_at, esc)}</div></div>
-          <div class="item__meta"><span class="pill ${readiness.ready ? "pill--ok" : "run--failed"}">${readiness.ready ? "ready" : esc(worker.status)}</span><span class="pill">${esc(readiness.fresh_running_workers)} active</span></div>
+          <div class="item__meta"><span class="pill ${readiness.ready ? "pill--ok" : "run--failed"}" data-hint="Worker readiness — ready means a heartbeat landed inside the freshness window; anything else is the worker's own reported status.">${readiness.ready ? "ready" : esc(worker.status)}</span><span class="pill" data-hint="How many scheduler workers currently hold a fresh heartbeat.">${esc(readiness.fresh_running_workers)} active</span></div>
         </div>` : `<div class="empty">No worker heartbeat recorded.</div>`;
       const tasks = data.deletion_tasks || [];
       outboxBox.innerHTML = tasks.length ? tasks.map((task) => `
         <div class="item">
           <div style="min-width:0;"><div class="item__title">${esc(task.adapter)}</div><div class="item__sub">${esc(task.source_ref)}</div></div>
-          <div class="item__meta">${runPill(task.status)}<span class="dim mono" style="margin:0 .4rem;">${esc(task.attempt_count)}/${esc(task.max_attempts)}</span>${task.status === "failed" ? `<button type="button" class="btn btn--sm ops-redrive" data-id="${esc(task.task_id)}">Retry</button>` : ""}</div>
+          <div class="item__meta">${runPill(task.status)}<span class="dim mono" style="margin:0 .4rem;" data-hint="Propagation attempts used out of the maximum allowed before the task is marked failed.">${esc(task.attempt_count)}/${esc(task.max_attempts)}</span>${task.status === "failed" ? `<button type="button" class="btn btn--sm ops-redrive" data-id="${esc(task.task_id)}" aria-label="Retry deletion task ${esc(task.task_id)}" data-hint="Re-queues this failed deletion for another propagation attempt by the worker. The redrive is recorded in the audit trail.">Retry</button>` : ""}</div>
         </div>`).join("") : `<div class="empty">No source-owner deletion tasks — every tombstone has propagated.</div>`;
       outboxBox.querySelectorAll(".ops-redrive").forEach((button) => button.addEventListener("click", async () => {
         button.disabled = true;
@@ -306,14 +308,14 @@ export function init(section, ctx) {
     try {
       const data = await api.get("/kb.audit?limit=50");
       const events = data.events || [];
-      auditBox.innerHTML = events.length ? `<div class="tablewrap"><table class="ops-table">
+      auditBox.innerHTML = events.length ? `<div class="tablewrap"><table class="ops-table" aria-label="Audit events">
         <thead><tr><th>Action</th><th>Actor</th><th>Resource</th><th>Outcome</th><th>When</th></tr></thead>
         <tbody>${events.map((event) => `
           <tr>
             <td class="mono">${esc(event.action)}</td>
             <td>${esc(event.actor)}</td>
             <td class="mono dim">${esc(event.resource)}</td>
-            <td><span class="pill ${event.outcome === "success" || event.outcome === "approved" ? "pill--ok" : ""}">${esc(event.outcome)}</span></td>
+            <td><span class="pill ${event.outcome === "success" || event.outcome === "approved" ? "pill--ok" : ""}" data-hint="How the recorded action ended — failures and denials stay in the trail too.">${esc(event.outcome)}</span></td>
             <td class="dim">${fmtTime(event.recorded_at, esc)}</td>
           </tr>`).join("")}</tbody>
       </table></div>` : `<div class="empty">No recorded changes.</div>`;
