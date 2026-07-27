@@ -92,6 +92,7 @@ function injectStyles() {
   #view-sources .tool[hidden] { display: none !important; }
   #view-sources .tool > .pill { margin-left: auto; flex: none; }
   #view-sources .tool__main { min-width: 0; }
+  #view-sources .src-about { font-size: .8rem; margin: -.5rem 0 1.1rem; }
   `;
   document.head.appendChild(st);
 }
@@ -105,11 +106,12 @@ export function init(section, ctx) {
     <p class="kicker">Federation</p>
     <h1 class="title">Sources</h1>
     <p class="lede">The stores this observatory watches — availability, live counts, and the agent access contracts.</p>
+    <p class="dim src-about">About this view — a live instrument board for every store the observatory federates, plus the MCP tool contracts agents call. <a href="#help">Learn more</a></p>
 
-    <div id="srcGroups" aria-live="polite">${LOADING}</div>
+    <div id="srcGroups" aria-live="polite" aria-label="Federated stores">${LOADING}</div>
 
-    <h2 class="section">Registered MCP tools <span class="pill" id="srcToolNs">knowledge</span> <span class="dim" id="srcVersion"></span></h2>
-    <div class="list" id="srcTools" aria-live="polite">${LOADING}</div>`;
+    <h2 class="section">Registered MCP tools <span class="pill" id="srcToolNs" data-hint="Tool namespace — agents call these over MCP as namespace.tool, e.g. knowledge.search.">knowledge</span> <span class="dim" id="srcVersion"></span></h2>
+    <div class="list" id="srcTools" aria-live="polite" aria-label="Registered MCP tools">${LOADING}</div>`;
 
   const groupsBox = section.querySelector("#srcGroups");
   const toolsBox = section.querySelector("#srcTools");
@@ -117,12 +119,12 @@ export function init(section, ctx) {
   function statusPill(entry, group, status) {
     const count = Number(entry.count) || 0;
     if (group && group.id === "graph" && count === 0) {
-      return `<span class="pill pill--off">configured · awaiting population</span>`;
+      return `<span class="pill pill--off" data-hint="The adapter is configured and answering, but the store holds nothing yet — no data has been ingested.">configured · awaiting population</span>`;
     }
     if (status && !status.enabled) {
-      return `<span class="pill pill--off">○ ${esc(status.status)}</span>`;
+      return `<span class="pill pill--off" data-hint="Adapter is disabled or unreachable — this store is not part of federated retrieval right now.">○ ${esc(status.status)}</span>`;
     }
-    return `<span class="pill pill--ok">● ${esc(status ? status.status : "reachable")}</span>`;
+    return `<span class="pill pill--ok" data-hint="Adapter answered when this page loaded — the store is live in federated retrieval.">● ${esc(status ? status.status : "reachable")}</span>`;
   }
 
   /* one instrument plate per store: badge · count · last-sync/detail */
@@ -133,30 +135,35 @@ export function init(section, ctx) {
     const sync = entry.last_sync || entry.synced_at || entry.last_synced_at
       || (status && (status.last_sync || status.synced_at)) || null;
     const foot = sync ? `sync ${fmtTime(sync, esc)}` : ((status && status.detail) || String(entry.key));
+    const footHint = sync
+      ? "Last sync — when this store's content last flowed into the observatory. Older syncs mean staler answers from this source."
+      : "Adapter detail line — no sync timestamp is recorded for this store.";
     return `<div class="card src-plate">
       <div class="src-plate__top">
-        <span class="src-badge ${srcClass(entry.key)}" title="${esc(label)}"><span class="src-badge__t">${esc(label)}</span></span>
+        <span class="src-badge ${srcClass(entry.key)}" title="${esc(label)}" data-hint-title="${esc(label)}"
+          data-hint="${esc(group.title)} store — ${esc(group.blurb)}. Its glow color matches this source's band in the constellation."><span class="src-badge__t">${esc(label)}</span></span>
         ${statusPill(entry, group, status)}
       </div>
       <div class="stat">
-        <span class="stat__n mono src-count" data-count="${count}">0</span>
+        <span class="stat__n mono src-count" data-count="${count}" data-hint="Live ${esc(entry.unit || group.unit)} count reported by the store just now — not a cached figure. Zero with a reachable adapter means awaiting population.">0</span>
         <span class="stat__l">${esc(entry.unit || group.unit)}</span>
       </div>
-      <div class="item__meta" title="${esc(foot)}">${esc(foot)}</div>
+      <div class="item__meta" title="${esc(foot)}" data-hint="${footHint}">${esc(foot)}</div>
     </div>`;
   }
 
   /* availability-only plate for sources without a stats entry */
   function plainPlate(s) {
     const pill = s.enabled
-      ? `<span class="pill pill--ok">● ${esc(s.status)}</span>`
-      : `<span class="pill pill--off">○ ${esc(s.status)}</span>`;
+      ? `<span class="pill pill--ok" data-hint="Adapter answered when this page loaded — the store is live in federated retrieval.">● ${esc(s.status)}</span>`
+      : `<span class="pill pill--off" data-hint="Adapter is disabled or unreachable — this store is not part of federated retrieval right now.">○ ${esc(s.status)}</span>`;
     return `<div class="card src-plate">
       <div class="src-plate__top">
-        <span class="src-badge ${srcClass(s.name)}" title="${esc(sourceLabel(s.name))}"><span class="src-badge__t">${esc(sourceLabel(s.name))}</span></span>
+        <span class="src-badge ${srcClass(s.name)}" title="${esc(sourceLabel(s.name))}"
+          data-hint="A federated store reporting availability only — it publishes no live counts on this host."><span class="src-badge__t">${esc(sourceLabel(s.name))}</span></span>
         ${pill}
       </div>
-      <div class="item__meta" title="${esc(s.detail || "")}">${esc(s.detail || "no detail reported")}</div>
+      <div class="item__meta" title="${esc(s.detail || "")}" data-hint="The adapter's own status detail line.">${esc(s.detail || "no detail reported")}</div>
     </div>`;
   }
 
@@ -232,8 +239,8 @@ export function init(section, ctx) {
             <div class="dim" style="margin-top:.25rem;font-size:.84rem;">${esc(t.description || "")}</div>
           </div>
           ${t.read_only
-            ? '<span class="pill pill--ok">read-only</span>'
-            : '<span class="pill">write</span>'}
+            ? '<span class="pill pill--ok" data-hint="Contract flag — this tool only reads memory; a call can never write or delete anything.">read-only</span>'
+            : '<span class="pill" data-hint="Contract flag — this tool can create or change data. Access is permission-gated.">write</span>'}
         </div>`).join("") : `<div class="empty">No tools published in the manifest.</div>`;
     } catch (e) { ctx.error(toolsBox, e); }
   }

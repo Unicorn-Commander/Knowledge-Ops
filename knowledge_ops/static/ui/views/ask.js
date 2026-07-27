@@ -65,8 +65,8 @@ const VERDICTS = {
 };
 
 const MODES = [
-  ["ground", "Assess"],
-  ["search", "Passages"],
+  ["ground", "Assess", "Retrieves evidence, then applies a heuristic verdict over it — supportive, contested, or not enough. A triage of retrieval, never fact verification."],
+  ["search", "Passages", "Raw federated retrieval — the top-k passages ranked by relevance, with no verdict layer applied."],
 ];
 
 const VALID_SCOPES = ["global", "personal", "all"];
@@ -112,6 +112,7 @@ function injectStyles() {
 .ask-more[hidden]{display:none!important}
 .ask-uri{font-family:var(--mu-font-mono);font-size:.7rem;color:var(--mu-color-dim);overflow-wrap:anywhere}
 .ask-hint__gram{font-size:.75rem;letter-spacing:.05em}
+.ask-about{font-size:.8rem;margin:-.5rem 0 0}
 /* settle-in (guarded by a REDUCED() check before the class is added) */
 .ask-in{opacity:0;transform:translateY(6px);animation:ask-settle 320ms var(--mu-ease-settle) forwards}
 @keyframes ask-settle{to{opacity:1;transform:none}}
@@ -178,15 +179,19 @@ export function init(sectionEl, ctx) {
     head.innerHTML = `
       <p class="kicker">Evidence workbench</p>
       <h1 class="title">Ask the constellation.</h1>
-      <p class="lede">Answers arrive as cited evidence — heuristic retrieval, never presented as verified fact.</p>`;
+      <p class="lede">Answers arrive as cited evidence — heuristic retrieval, never presented as verified fact.</p>
+      <p class="dim ask-about">About this view — questions typed into the lens land here as cited passages pulled from every federated store. <a href="#help">Learn more</a></p>`;
     stage.innerHTML = `
       <p class="lbl ask-try">Try an ask</p>
       <div class="list" role="group" aria-label="Example asks">
         ${EXAMPLES.map(exampleRow).join("")}
       </div>
       <div class="ask-hint">
-        <button type="button" class="btn" id="askLensCta">Ask from anywhere <span class="ask-kbd" aria-hidden="true">⌘K</span></button>
-        <span class="dim mono ask-hint__gram" aria-hidden="true">↵ ask · &gt; commands · @ documents</span>
+        <button type="button" class="btn" id="askLensCta"
+          data-hint-title="The lens"
+          data-hint="Jumps to the lens — the single field where questions are typed. Press Enter to ask; the evidence lands on this pane.">Ask from anywhere <span class="ask-kbd" aria-hidden="true">⌘K</span></button>
+        <span class="dim mono ask-hint__gram" aria-hidden="true"
+          data-hint="Lens grammar — plain text asks the memory, a leading &gt; runs commands, and @ references a document by name.">↵ ask · &gt; commands · @ documents</span>
       </div>`;
     bindExamples(stage);
     stage.querySelector("#askLensCta").addEventListener("click", focusLens);
@@ -196,21 +201,24 @@ export function init(sectionEl, ctx) {
 
   function renderRunHead(phase, ms) {
     let timing = "";
-    if (phase === "running") timing = `<span class="pill pill--off">running…</span>`;
+    if (phase === "running") timing = `<span class="pill pill--off" data-hint="Query in flight — every federated store is being asked in parallel.">running…</span>`;
     else if (phase === "done" && typeof ms === "number") {
-      timing = `<span class="pill">${(ms / 1000).toFixed(2)} s</span>`;
+      timing = `<span class="pill" data-hint="Wall-clock time for the whole run — every store queried, results merged and re-ranked.">${(ms / 1000).toFixed(2)} s</span>`;
     }
     head.innerHTML = `
       <p class="kicker">Evidence workbench</p>
       <h1 class="title ask-q">“${esc(currentQuery)}”</h1>
       <div class="ask-meta">
         <div class="ask-meta__pills">
-          <span class="pill pill--scope">${esc(scopeLabel())}</span>
-          <span class="pill">k ${esc(String(currentK))}</span>
+          <span class="pill pill--scope" data-hint-title="Scope"
+            data-hint="Which memory was searched — mine+shared is the default; personal is only yours; global is org-wide; all is everything you can access.">${esc(scopeLabel())}</span>
+          <span class="pill" data-hint-title="Retrieval budget"
+            data-hint="k is how many passages the federation returns after merging and re-ranking. Set it from the lens; default 8, max 50.">k ${esc(String(currentK))}</span>
           ${timing}
         </div>
         <div class="ask-seg" role="group" aria-label="Answer mode">
-          ${MODES.map(([m, label]) => `<button type="button" class="seg__opt" data-mode="${m}"
+          ${MODES.map(([m, label, hint]) => `<button type="button" class="seg__opt" data-mode="${m}"
+            data-hint-title="${label} mode" data-hint="${hint}"
             aria-pressed="${String(m === currentMode)}">${label}</button>`).join("")}
         </div>
         <button type="button" class="btn" id="askAgain">Ask again <span class="ask-kbd" aria-hidden="true">⌘K</span></button>
@@ -238,17 +246,20 @@ export function init(sectionEl, ctx) {
     const score = typeof p.score === "number" ? Math.max(0, Math.min(1, p.score)) : 0;
     const text = String(p.text || "");
     const scope = p.scope && p.scope !== "global"
-      ? `<span class="pill pill--scope">${esc(p.scope)}</span>` : "";
+      ? `<span class="pill pill--scope" data-hint="Visibility of this passage — personal and team passages are only retrievable by people with that access.">${esc(p.scope)}</span>` : "";
     const relation = p.metadata && p.metadata.evidence_relation
-      ? `<span class="pill">${esc(String(p.metadata.evidence_relation).replace(/_/g, " "))}</span>` : "";
+      ? `<span class="pill" data-hint="How the heuristic related this passage to your question — e.g. supports, contradicts, or related background.">${esc(String(p.metadata.evidence_relation).replace(/_/g, " "))}</span>` : "";
     return `<article class="cite" data-i="${i}" tabindex="0"
       data-node-id="${esc(p.ref || p.source_id || "")}">
       <div class="cite__head">
         <span class="cite__n" aria-label="citation ${i}">${String(i).padStart(2, "0")}</span>
         <span class="cite__title">${esc(p.title || p.source_id || "untitled")}</span>
-        <span class="src-badge ${srcClass(p.source)} ask-src">${esc(srcLabel(p.source))}</span>
+        <span class="src-badge ${srcClass(p.source)} ask-src" data-hint-title="Source"
+          data-hint="Federated store this passage came from: ${esc(srcLabel(p.source))}. Color and glyph match its band in the constellation.">${esc(srcLabel(p.source))}</span>
         ${scope}${relation}
-        <span class="ask-score" role="img" aria-label="relevance score ${esc(fmtScore(p.score))}">
+        <span class="ask-score" role="img" aria-label="relevance score ${esc(fmtScore(p.score))}"
+          data-hint-title="Relevance"
+          data-hint="Similarity between your question and this passage, 0–1, used for ranking. High relevance is not endorsement or truth.">
           <span class="ask-score__track"><span class="ask-score__fill" style="width:${(score * 100).toFixed(0)}%;"></span></span>
           <span class="ask-score__n">${esc(fmtScore(p.score))}${p.owner ? ` · ${esc(p.owner)}` : ""}</span>
         </span>
@@ -258,6 +269,7 @@ export function init(sectionEl, ctx) {
         <span class="ask-uri">${esc(p.uri || "")}</span>
         <button type="button" class="btn btn--sm ask-more" hidden aria-expanded="false" aria-controls="askCiteText${i}">More</button>
         <button type="button" class="btn btn--sm cite__inspect ask-inspect"
+          data-hint="Opens the stored source behind this citation — the exact excerpt with the matched span highlighted, plus its lifecycle state."
           data-source="${esc(String(p.source || ""))}"
           data-source-id="${esc(String(p.source_id || ""))}">Inspect span</button>
       </div>
@@ -302,8 +314,10 @@ export function init(sectionEl, ctx) {
   function verdictBlock(data) {
     const [cls, label] = VERDICTS[data.verdict] || ["pill--off", "unassessed"];
     return `<div class="ask-verdict">
-        <span class="pill ${cls}">${esc(label)}</span>
-        <span class="pill pill--off">heuristic, not verified</span>
+        <span class="pill ${cls}" data-hint-title="Heuristic verdict"
+          data-hint="Heuristic triage of the retrieved evidence — supportive, contested, or unclear. It judges what retrieval surfaced; it is not verification.">${esc(label)}</span>
+        <span class="pill pill--off"
+          data-hint="A permanent honesty label — verdicts come from retrieval heuristics, not from human review or a fact-checker.">heuristic, not verified</span>
       </div>
       ${data.answer ? `<p class="answer ask-answer">${esc(data.answer)}</p>` : ""}`;
   }
@@ -360,13 +374,13 @@ export function init(sectionEl, ctx) {
       }
       const span = c.source_span || {};
       const spanPill = Number.isInteger(span.start) && Number.isInteger(span.end)
-        ? `<span class="pill">codepoints ${esc(String(span.start))}–${esc(String(span.end))}</span>`
+        ? `<span class="pill" data-hint="Where the cited span sits inside the source text, counted in Unicode codepoints (start–end).">codepoints ${esc(String(span.start))}–${esc(String(span.end))}</span>`
         : "";
       content.innerHTML = `
         <div class="row" style="margin-bottom:.6rem;">
           <span class="src-badge ${srcClass(c.source)} ask-src">${esc(srcLabel(c.source))}</span>
           ${spanPill}
-          ${c.lifecycle ? `<span class="pill">${esc(c.lifecycle.state)}</span>` : ""}
+          ${c.lifecycle ? `<span class="pill" data-hint="Lifecycle state of the source document in governed memory — e.g. active, stale, or tombstoned.">${esc(c.lifecycle.state)}</span>` : ""}
         </div>
         <div class="ask-uri" style="margin:0 0 .6rem;">${esc(c.source_path || c.source_id || "")}</div>
         <pre class="ask-excerpt source-excerpt">${highlight(c.excerpt, c.match_ranges)}</pre>

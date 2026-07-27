@@ -12,7 +12,7 @@
   <meta name="color-scheme" content="dark light" />
   <title>Knowledge-Ops — Constellation</title>
   <meta name="description" content="Watch your organization think. Magic Unicorn's governed organizational memory — evidence-first retrieval with source-level citations." />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%239b7cf6'/%3E%3Cstop offset='1' stop-color='%2346c2b3'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='46' fill='url(%23g)'/%3E%3Ctext x='50' y='68' font-size='56' text-anchor='middle' font-family='Georgia,serif' font-weight='700' fill='%2307050b'%3EK%3C/text%3E%3C/svg%3E" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23a78bfa'/%3E%3Cstop offset='1' stop-color='%234ed3c2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='54' r='42' fill='url(%23g)'/%3E%3Cpath d='M58 30 84 4 66 40z' fill='url(%23g)'/%3E%3Cpath d='M58 30 84 4 66 40' fill='none' stroke='%23ece9f8' stroke-width='4' stroke-linejoin='round'/%3E%3Ccircle cx='58' cy='56' r='7' fill='%23070512'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="ui/fonts.css" />
   <link rel="stylesheet" href="ui/tokens.css" />
   <link rel="stylesheet" href="ui/base.css" />
@@ -39,6 +39,7 @@
 
   <header class="bar">
     <a class="brand" href="#home">
+      <img class="brand__mark" src="brand/ko-mark.svg" alt="" width="26" height="26" />
       <span class="brand__name">Knowledge<b>-Ops</b></span>
       <span class="brand__tag">Observatory</span>
     </a>
@@ -76,6 +77,9 @@
     <a class="dock__btn" data-view="ops" href="#ops" aria-label="Operations">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4.5 17a7.5 7.5 0 0 1 15 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M12 17l3.4-4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
     </a>
+    <a class="dock__btn" data-view="help" href="#help" aria-label="Help">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="1.6"/><path d="M9.9 9.8a2.2 2.2 0 1 1 3.1 2c-.72.4-1 .8-1 1.6v.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="16.6" r="1" fill="currentColor"/></svg>
+    </a>
   </nav>
 
   <main class="main" id="mainContent" tabindex="-1">
@@ -90,6 +94,7 @@
     <section class="view" id="view-sources" hidden aria-label="Sources"></section>
     <section class="view view--bleed" id="view-graph" hidden aria-label="Graph"></section>
     <section class="view" id="view-ops" hidden aria-label="Operations"></section>
+    <section class="view" id="view-help" hidden aria-label="Help"></section>
     <noscript><div class="error" style="margin:2rem;">Knowledge-Ops needs JavaScript to render the constellation. Enable it and reload.</div></noscript>
   </main>
 

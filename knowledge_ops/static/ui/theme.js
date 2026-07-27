@@ -6,6 +6,7 @@
 export const THEMES = [
   { name: "aurora",   label: "Aurora",   hint: "deep-space default" },
   { name: "daylight", label: "Daylight", hint: "ink & gold on paper" },
+  { name: "porcelain", label: "Porcelain", hint: "cool gallery light" },
   { name: "nebula",   label: "Nebula",   hint: "saturated demo reel" },
   { name: "midnight", label: "Midnight", hint: "quiet OLED black" },
 ];

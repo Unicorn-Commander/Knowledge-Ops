@@ -2,7 +2,7 @@
    Knowledge-Ops — Observatory token system (v2).
    One instrument, four skies.
 
-   Themes live on <html data-theme="aurora|daylight|nebula|midnight">.
+   Themes live on <html data-theme="aurora|daylight|porcelain|nebula|midnight">.
    :root defaults = AURORA. Every contract variable is defined in ALL themes.
    Un-themed first visits on light-mode systems map to DAYLIGHT via
    @media (prefers-color-scheme: light) — same custom properties.
@@ -218,6 +218,56 @@
   --mu-src-files: #b0508f;
   --mu-src-graph: #2e7d4f;
   --mu-src-metrics: #5b6b7e;
+}
+
+/* ---------------------------------------------------------------- PORCELAIN
+   The gallery — cool white, pewter fittings, soft ink stars. The second
+   light theme: where Daylight is a warm chart room, Porcelain is a bright
+   quiet exhibition space. */
+:root[data-theme="porcelain"] {
+  color-scheme: light;
+  --mu-page-bg:
+    radial-gradient(110% 80% at 80% -15%, #eceef8 0%, rgba(236, 238, 248, 0) 55%),
+    radial-gradient(95% 80% at 4% 112%, #e7f2f0 0%, rgba(231, 242, 240, 0) 55%),
+    #f7f8fa;
+  --mu-color-bg: #f7f8fa;
+  --mu-color-bg-elevated: #ffffff;
+  --mu-color-text: #16151d;
+  --mu-color-muted: #4e4c5e;
+  --mu-color-dim: #807d92;
+  --mu-color-border: rgba(22, 21, 29, 0.12);
+  --mu-color-border-strong: rgba(22, 21, 29, 0.24);
+  --mu-hairline: rgba(22, 21, 29, 0.09);
+  --mu-color-surface: rgba(255, 255, 255, 0.55);
+  --mu-color-surface-strong: rgba(255, 255, 255, 0.85);
+  --mu-glass: rgba(255, 255, 255, 0.66);
+  --mu-glass-strong: rgba(255, 255, 255, 0.86);
+  --mu-field-bg: rgba(255, 255, 255, 0.75);
+  --mu-color-primary: #6b4fd0;
+  --mu-color-accent: #0e9488;
+  --mu-color-success: #157a58;
+  --mu-color-warning: #93651c;
+  --mu-color-danger: #bf4540;
+  --mu-brass: #6e6a7e;
+  --mu-ink-on-brand: #ffffff;
+  --mu-gradient-brand: linear-gradient(135deg, #6b4fd0 0%, #0e9488 100%);
+  --mu-focus-ring: 0 0 0 2px rgba(107, 79, 208, 0.55);
+  --mu-shadow-glow: 0 0 36px -10px rgba(107, 79, 208, 0.3);
+  --mu-shadow-pane:
+    0 24px 60px -34px rgba(22, 21, 29, 0.28),
+    0 0 0 1px var(--mu-hairline);
+  --mu-glow: 0.3;
+  --mu-canvas-bg: #f4f5f8;
+  --mu-canvas-star: #4a4370;
+  --mu-canvas-edge: rgba(74, 67, 112, 0.18);
+  --mu-canvas-label: #6e6a7e;
+  --mu-src-wiki: #6b4fd0;
+  --mu-src-org-memory: #0e9488;
+  --mu-src-meetings: #3961b8;
+  --mu-src-stable: #a06a20;
+  --mu-src-files: #a94f8a;
+  --mu-src-graph: #2c7a4e;
+  --mu-src-metrics: #58687a;
 }
 
 /* ---------------------------------------------------------------- NEBULA

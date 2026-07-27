@@ -24,17 +24,22 @@ function fmtShort(t, esc) {
 }
 
 const CHECKLIST = [
-  { id: "provenance", label: "Provenance — origin and author trail are recorded and plausible" },
-  { id: "access", label: "Access — visibility scope matches who should retrieve this" },
-  { id: "privacy", label: "Privacy — no unexpected PII, secrets, or client-confidential spill" },
-  { id: "content", label: "Content — accurate, current, and safe to cite as evidence" },
+  { id: "provenance", label: "Provenance — origin and author trail are recorded and plausible",
+    hint: "Check the trail: which system this came from, who authored it, and how it was staged — recorded and believable." },
+  { id: "access", label: "Access — visibility scope matches who should retrieve this",
+    hint: "Check the declared scope (personal / global) against who should actually be able to retrieve and cite this content." },
+  { id: "privacy", label: "Privacy — no unexpected PII, secrets, or client-confidential spill",
+    hint: "Look for names, contact details, credentials, or client-confidential content. Intentional PII also needs the acceptance box below." },
+  { id: "content", label: "Content — accurate, current, and safe to cite as evidence",
+    hint: "Check the material is accurate and current — once approved, agents and people will cite it as evidence." },
 ];
 
 /* import state → pill flavor (honest: approved is the only green) */
 function statePill(state, esc) {
   const s = String(state || "staged");
   const cls = s === "approved" ? "pill--ok" : (s === "rejected" ? "pill--off" : "");
-  return `<span class="pill ${cls}">${esc(s)}</span>`;
+  return `<span class="pill ${cls}" data-hint-title="Import state"
+    data-hint="staged = waiting for a human decision · approved = promoted into governed, citable memory · rejected = kept out. Approval is the only way in.">${esc(s)}</span>`;
 }
 
 let stylesInjected = false;
@@ -63,6 +68,7 @@ function injectStyles() {
   #view-review .rv-checks { display: flex; flex-direction: column; gap: .5rem; margin: .4rem 0 .9rem; }
   #view-review .rv-checks[hidden] { display: none !important; }
   #view-review .rv-zone { border-top: 1px solid var(--mu-hairline); margin-top: 1.9rem; padding-top: 1.3rem; }
+  #view-review .rv-about { font-size: .8rem; margin: -.5rem 0 1.1rem; }
   `;
   document.head.appendChild(st);
 }
@@ -75,14 +81,15 @@ export function init(section, ctx) {
     <p class="kicker">OpenWiki · governance</p>
     <h1 class="title">Review queue</h1>
     <p class="lede">Every import passes a human governance gate before it can be cited. Nothing sneaks into memory.</p>
+    <p class="dim rv-about">About this view — the human gate: staged imports need a governance sign-off before they become citable memory, and scans flag memory going stale. <a href="#help">Learn more</a></p>
 
     <div class="section-row">
       <h2 class="section section--flush">Imports <span class="dim" id="rvCount"></span></h2>
       <button type="button" class="btn btn--sm" id="rvRefresh">Refresh</button>
     </div>
     <div class="rv-split">
-      <div class="list" id="rvList" aria-live="polite">${LOADING}</div>
-      <div class="rv-inspect" id="rvPane" aria-live="polite">
+      <div class="list" id="rvList" aria-live="polite" aria-label="Staged imports">${LOADING}</div>
+      <div class="rv-inspect" id="rvPane" aria-live="polite" aria-label="Import inspection">
         <div class="empty"><span class="big">Nothing under the glass</span>Select an import to inspect its findings and documents.</div>
       </div>
     </div>
@@ -93,9 +100,10 @@ export function init(section, ctx) {
           <p class="kicker">Memory quality</p>
           <h2 class="section section--flush">Staleness and conflicts</h2>
         </div>
-        <button type="button" class="btn btn--sm" id="rvScanBtn">Scan now</button>
+        <button type="button" class="btn btn--sm" id="rvScanBtn"
+          data-hint="Runs the staleness and conflict scan across governed memory right now. It only detects and lists findings — nothing is changed.">Scan now</button>
       </div>
-      <div class="list" id="rvMemoryList" aria-live="polite">${LOADING}</div>
+      <div class="list" id="rvMemoryList" aria-live="polite" aria-label="Memory quality findings">${LOADING}</div>
     </div>`;
 
   const list = section.querySelector("#rvList");
@@ -135,7 +143,7 @@ export function init(section, ctx) {
             <div class="item__title mono">${esc(item.import_id)}</div>
             <div class="item__sub">${esc(item.document_count)} docs · ${fmtShort(item.staged_at, esc)}</div>
           </div>
-          <div class="item__meta rv-meta">${statePill(item.state, esc)}${blocking ? `<span class="pill run--failed">${blocking} blocking</span>` : ""}</div>`;
+          <div class="item__meta rv-meta">${statePill(item.state, esc)}${blocking ? `<span class="pill run--failed" data-hint="Number of findings flagged blocking — review them in the inspection pane before approving this import.">${blocking} blocking</span>` : ""}</div>`;
         button.addEventListener("click", () => viewImport(item.import_id));
         list.appendChild(button);
       });
@@ -155,7 +163,7 @@ export function init(section, ctx) {
       const decided = ["approved", "rejected"].includes(item.state);
 
       const checklistHtml = CHECKLIST.map((c) => `
-        <label class="check">
+        <label class="check" data-hint="${esc(c.hint)}">
           <input type="checkbox" class="rv-gate" id="rvGate-${c.id}" />
           ${esc(c.label)}
         </label>`).join("");
@@ -171,7 +179,7 @@ export function init(section, ctx) {
         </div>
         <h3 class="subhead">Findings</h3>
         <div class="list">${findings.length ? findings.map((f) => `
-          <div class="finding finding--${esc(f.severity)}"><span class="pill ${f.severity === "blocking" ? "run--failed" : ""}">${esc(f.severity)}</span><strong>${esc(f.category)}</strong><span>${esc(f.path)} · ${esc(f.detail)}</span></div>`).join("") : `<div class="empty">No findings.</div>`}</div>
+          <div class="finding finding--${esc(f.severity)}"><span class="pill ${f.severity === "blocking" ? "run--failed" : ""}" data-hint="Finding severity — blocking should stop approval until it is reviewed; lower severities are advisory.">${esc(f.severity)}</span><strong>${esc(f.category)}</strong><span>${esc(f.path)} · ${esc(f.detail)}</span></div>`).join("") : `<div class="empty">No findings.</div>`}</div>
         <h3 class="subhead">Documents</h3>
         <div class="list">${documents.map((d) => `
           <div class="item">
@@ -183,14 +191,14 @@ export function init(section, ctx) {
           : `<div class="rv-gatezone">
               <p class="kicker" style="margin-bottom:.4rem;">Governance checklist</p>
               <div class="rv-checks" role="group" aria-label="Approval checklist">${checklistHtml}</div>
-              <label class="check"><input type="checkbox" id="rvAcceptPii" /> PII is expected and approved for this visibility</label>
+              <label class="check" data-hint="Records an explicit decision in the audit trail: you saw personal data in this import and accept it at the declared visibility."><input type="checkbox" id="rvAcceptPii" /> PII is expected and approved for this visibility</label>
               <div class="field" style="margin-top:.9rem;">
                 <label class="lbl" for="rvNote">Review note</label>
-                <textarea class="textarea" id="rvNote" rows="3" style="min-height:5.4rem;" placeholder="What did you verify, and why does this belong in governed memory?"></textarea>
+                <textarea class="textarea" id="rvNote" rows="3" style="min-height:5.4rem;" data-hint="Required. Stored with your decision in the audit trail — say what you verified and why it belongs in governed memory." placeholder="What did you verify, and why does this belong in governed memory?"></textarea>
               </div>
               <div class="review-actions">
-                <button type="button" class="btn btn--primary" id="rvApprove" disabled>Approve</button>
-                <button type="button" class="btn" id="rvReject">Reject</button>
+                <button type="button" class="btn btn--primary" id="rvApprove" disabled data-hint="Promotes every document in this import into governed, citable memory. Unlocks after all four checks and a note; the decision is audited.">Approve</button>
+                <button type="button" class="btn" id="rvReject" data-hint="Keeps this import out of governed memory. Your note records why; the decision lands in the audit trail.">Reject</button>
               </div>
               <p class="dim" id="rvGateHint">Approval unlocks when all four checks pass and a note is written.</p>
             </div>`}`;
@@ -246,7 +254,7 @@ export function init(section, ctx) {
           || details.path || item.path || item.resource_id || item.doc_id || "";
         return `<div class="item review-item">
           <div style="min-width:0;"><div class="item__title">${esc(reason)}</div><div class="item__sub">${esc(locator)}</div></div>
-          <div class="item__meta rv-meta"><span class="pill ${item.kind === "conflict" ? "run--failed" : ""}">${esc(item.kind)}</span>${item.severity ? `<span class="pill">${esc(item.severity)}</span>` : ""}${item.due_at ? `<span class="pill">due ${fmtShort(item.due_at, esc)}</span>` : ""}<button type="button" class="btn btn--sm rv-resolve" data-id="${esc(item.id)}">Resolve</button></div>
+          <div class="item__meta rv-meta"><span class="pill ${item.kind === "conflict" ? "run--failed" : ""}" data-hint="Finding kind — staleness means a memory passed its review horizon; conflict means two memories disagree.">${esc(item.kind)}</span>${item.severity ? `<span class="pill" data-hint="How urgent the scan judged this finding to be.">${esc(item.severity)}</span>` : ""}${item.due_at ? `<span class="pill" data-hint="Review-by date derived from the memory's staleness policy.">due ${fmtShort(item.due_at, esc)}</span>` : ""}<button type="button" class="btn btn--sm rv-resolve" data-id="${esc(item.id)}" aria-label="Resolve finding: ${esc(reason)}" data-hint="Closes this finding with a short note (prompted next) — you are asserting it is handled. A later scan can raise it again if it persists.">Resolve</button></div>
         </div>`;
       }).join("");
       memoryList.querySelectorAll(".rv-resolve").forEach((button) => button.addEventListener("click", async () => {

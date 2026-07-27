@@ -87,7 +87,8 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 html[data-route="home"] .bar { background: transparent; border-bottom-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 
-.brand { display: inline-flex; align-items: baseline; gap: .55rem; color: var(--mu-color-text); }
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--mu-color-text); }
+.brand__mark { flex: none; translate: 0 -1px; }
 .brand:hover { text-decoration: none; }
 .brand__name { font-family: var(--mu-font-display); font-weight: 600; font-size: 1.02rem; letter-spacing: .01em; }
 .brand__name b { font-weight: 600; background: var(--mu-gradient-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -198,6 +199,12 @@ html[data-route="graph"] .main { padding-left: calc(var(--mu-dock-w) + 1.6rem); 
   left: 50%; bottom: 1.15rem; translate: -50% 0;
   z-index: 70;
   width: var(--mu-lens-w);
+}
+/* On the home hero the lens IS the centerpiece: it sits mid-page under the
+   headline (the "search bar in the middle"). Reading routes keep it docked
+   at the bottom. Small viewports keep the docked position everywhere. */
+@media (min-width: 881px) and (min-height: 720px) {
+  html[data-route="home"] .lens { bottom: auto; top: 56.5%; }
 }
 .lens__pill {
   display: flex; align-items: center; gap: .65rem;
@@ -647,7 +654,12 @@ button.item { cursor: pointer; }
   .dock {
     left: 50%; top: auto; bottom: 5.35rem; translate: -50% 0;
     flex-direction: row;
+    max-width: calc(100vw - 1.4rem);
+    overflow-x: auto;
+    scrollbar-width: none; /* 9 buttons × 44px can exceed narrow phones — the strip scrolls, targets stay full-size */
   }
+  .dock::-webkit-scrollbar { display: none; }
+  .dock__btn { flex: none; }
   .dock__btn::before { display: none; }
   .main { padding: calc(var(--mu-bar-h) + .9rem) .8rem 10.5rem .8rem; }
   html[data-route="home"] .main, html[data-route="graph"] .main { padding-left: .8rem; }
