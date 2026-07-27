@@ -77,6 +77,7 @@ def test_static_files_present_on_disk():
         "ui/views/files.js",
         "ui/views/sources.js",
         "ui/views/ops.js",
+        "ui/views/help.js",
     ):
         assert (STATIC / name).is_file(), f"missing static asset {name}"
 
@@ -91,8 +92,8 @@ def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     assert "fonts.googleapis.com" not in html and "cdn." not in html
     assert "onclick=" not in html and "onclick=" not in js
     # Eight routed views, eight nav entries.
-    assert html.count('class="dock__btn"') == 8
-    for view in ("home", "ask", "library", "review", "files", "sources", "graph", "ops"):
+    assert html.count('class="dock__btn"') == 9
+    for view in ("home", "ask", "library", "review", "files", "sources", "graph", "ops", "help"):
         assert f'id="view-{view}"' in html
     # Status dot starts unknown; the shell flips it after probing /ready.
     assert '>Ready<' not in html and '>Checking<' in html

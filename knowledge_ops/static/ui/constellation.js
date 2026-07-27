@@ -46,6 +46,70 @@ const SRC_TOKEN = {
   'metrics': '--mu-src-metrics',
 };
 
+/* Shape channel: every source carries a glyph as well as a color, so the
+ * map survives color-blindness, monochrome screenshots, and tiny sizes. */
+const SRC_GLYPH = {
+  'wiki': 'circle',
+  'org-memory': 'diamond',
+  'meetings': 'triangle',
+  'stable': 'square',
+  'files': 'penta',
+  'graph': 'star',
+  'metrics': 'hexa',
+  'other': 'cross',
+};
+
+function traceGlyph(g, shape, x, y, r) {
+  const poly = (sides, rot, rad) => {
+    for (let i = 0; i <= sides; i++) {
+      const a = rot + (i / sides) * Math.PI * 2;
+      const px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+      if (i) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+  };
+  g.beginPath();
+  switch (shape) {
+    case 'diamond': poly(4, -Math.PI / 2, r * 1.22); break;
+    case 'triangle': poly(3, -Math.PI / 2, r * 1.28); break;
+    case 'square': poly(4, -Math.PI / 4, r * 1.08); break;
+    case 'penta': poly(5, -Math.PI / 2, r * 1.16); break;
+    case 'hexa': poly(6, 0, r * 1.1); break;
+    case 'star': {
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+        const rad = i % 2 ? r * 0.58 : r * 1.38;
+        const px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+        if (i) g.lineTo(px, py); else g.moveTo(px, py);
+      }
+      g.closePath(); break;
+    }
+    case 'cross': {
+      const t = r * 0.44, R = r * 1.16;
+      g.moveTo(x - t, y - R); g.lineTo(x + t, y - R); g.lineTo(x + t, y - t); g.lineTo(x + R, y - t);
+      g.lineTo(x + R, y + t); g.lineTo(x + t, y + t); g.lineTo(x + t, y + R); g.lineTo(x - t, y + R);
+      g.lineTo(x - t, y + t); g.lineTo(x - R, y + t); g.lineTo(x - R, y - t); g.lineTo(x - t, y - t);
+      g.closePath(); break;
+    }
+    default: g.arc(x, y, r, 0, Math.PI * 2);
+  }
+}
+
+/* The same glyphs as 12px inline SVG for legends, pills, and tooltips. */
+export function glyphSvg(srcKey) {
+  const shape = SRC_GLYPH[srcKey] || 'circle';
+  const P = {
+    circle: '<circle cx="6" cy="6" r="4.4"/>',
+    diamond: '<polygon points="6,0.8 11.2,6 6,11.2 0.8,6"/>',
+    triangle: '<polygon points="6,1 11.2,10.4 0.8,10.4"/>',
+    square: '<rect x="1.8" y="1.8" width="8.4" height="8.4"/>',
+    penta: '<polygon points="6,0.8 11,4.6 9.1,10.6 2.9,10.6 1,4.6"/>',
+    hexa: '<polygon points="10.8,6 8.4,10.2 3.6,10.2 1.2,6 3.6,1.8 8.4,1.8"/>',
+    star: '<polygon points="6,0.6 7.4,4.2 11.4,4.4 8.3,6.9 9.4,10.8 6,8.6 2.6,10.8 3.7,6.9 0.6,4.4 4.6,4.2"/>',
+    cross: '<path d="M4.4 1h3.2v3.4H11v3.2H7.6V11H4.4V7.6H1V4.4h3.4z"/>',
+  };
+  return `<svg class="ko-glyph" width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">${P[shape] || P.circle}</svg>`;
+}
+
 // Real collection counts (only used to shape the last-resort ambient field —
 // decorative, unlabeled; we never present fabricated nodes as data).
 const AMBIENT_SHAPE = [
@@ -146,12 +210,16 @@ function ensureCss() {
 .ko-tooltip { position: absolute; z-index: 30; max-width: 34ch; padding: .35rem .65rem; border-radius: var(--mu-radius-sm); background: var(--mu-glass-strong); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 0 0 1px var(--mu-hairline); color: var(--mu-color-text); font-family: var(--mu-font-mono); font-size: .76rem; pointer-events: none; transform: translate(-50%, calc(-100% - 14px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* home hero — copy floats directly on the sky, no card, no box */
-.ko-hero2 { position: relative; min-height: calc(100vh - var(--mu-bar-h) - 1.5rem); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; padding: 0 1.2rem 17vh; text-align: center; pointer-events: none; }
+.ko-hero2 { position: relative; min-height: calc(100vh - var(--mu-bar-h) - 1.5rem); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; padding: 0 1.2rem 26vh; text-align: center; pointer-events: none; }
 .ko-hero2::before { content: ""; position: absolute; left: 50%; top: 50%; translate: -50% -54%; width: min(66rem, 96vw); height: 24rem; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--mu-color-bg) 62%, transparent) 0%, transparent 74%); pointer-events: none; }
 .ko-hero2 > * { pointer-events: auto; position: relative; }
 .ko-hero2 h1 { font-family: var(--mu-font-display); font-size: var(--mu-type-hero); font-weight: 550; line-height: .98; letter-spacing: -0.022em; margin: .5rem 0 1rem; text-wrap: balance; text-shadow: 0 0 calc(34px * var(--mu-glow, .6)) color-mix(in srgb, var(--mu-color-primary) 40%, transparent); }
 .ko-hero2 .lede { margin: 0 auto; }
-.ko-hero-cta { margin-top: 1.4rem; display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+.ko-hero-cta { margin-top: 1.2rem; display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+@media (min-width: 881px) and (min-height: 720px) {
+  /* the lens is fixed mid-page on home — pin the doors right beneath it */
+  html[data-route="home"] .ko-hero-cta { position: fixed; left: 50%; top: calc(56.5% + 4.7rem); translate: -50% 0; margin: 0; z-index: 12; }
+}
 .ko-hero-cta kbd { font-family: var(--mu-font-mono); font-size: .72em; opacity: .75; margin-left: .35em; }
 .ko-hero-status { position: fixed; right: 1.35rem; left: calc(50% + var(--mu-lens-w) / 2 + 1.2rem); bottom: 1.35rem; z-index: 12; pointer-events: none; font-family: var(--mu-font-mono); font-size: .72rem; font-variant-numeric: tabular-nums; letter-spacing: .04em; color: var(--mu-color-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 html:not([data-route="home"]) .ko-hero-status { display: none; }
@@ -166,7 +234,9 @@ html:not([data-route="home"]) .ko-hero-status { display: none; }
 .ko-legend .pill input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
 .ko-legend .pill:has(input:focus-visible) { outline: 2px solid var(--mu-color-primary); outline-offset: 2px; }
 .ko-legend .pill[data-off="1"] { opacity: .45; }
-.ko-dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; box-shadow: 0 0 8px color-mix(in srgb, currentColor 60%, transparent); }
+.ko-dot { width: .6rem; height: .6rem; border-radius: 50%; flex: none; box-shadow: 0 0 8px color-mix(in srgb, currentColor 60%, transparent); background: currentColor; }
+.ko-glyphwrap { display: inline-grid; place-items: center; flex: none; filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 65%, transparent)); }
+.ko-orbit-hint { position: fixed; right: 1.2rem; bottom: 5.6rem; z-index: 20; pointer-events: none; font-family: var(--mu-font-mono); font-size: .7rem; letter-spacing: .06em; color: var(--mu-color-dim); }
 .ko-edgekey { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; font-family: var(--mu-font-mono); font-size: .72rem; color: var(--mu-color-dim); }
 .ko-edgekey__item { display: inline-flex; align-items: center; gap: .4rem; }
 .ko-edgeline { width: 1.4rem; height: 0; border-top: 1px solid var(--mu-canvas-edge); opacity: .5; flex: none; }
@@ -381,7 +451,11 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
   let adjacency = new Map(); // id -> Set(id)
   let nodeById = new Map();
 
-  const cam = { x: 0, y: 0, z: 1, tx: 0, ty: 0, tz: 1 };
+  // 3D camera: x/y = world anchor, z = zoom (dolly), yaw/pitch = orbit.
+  // Rest pose is a gentle three-quarter angle so depth reads instantly.
+  const cam = { x: 0, y: 0, z: 1, yaw: -0.34, pitch: 0.18, tx: 0, ty: 0, tz: 1, tyaw: -0.34, tpitch: 0.18 };
+  const PERSP = 1050;         // perspective distance (world units)
+  let autoOrbit = false;      // hero mode: the sky turns, slowly
   const pointer = { x: 0, y: 0, in: false };
 
   // interaction state
@@ -503,10 +577,24 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
     }
   }
 
+  /* Depth: each source gets a band on the z axis (the constellation is a
+   * layered volume, not a disc), every node a stable hash jitter inside it.
+   * Dust spreads much deeper — it is what makes the parallax read as space. */
+  function assignDepth() {
+    for (const n of sim.nodes) {
+      if (typeof n.z === 'number') continue;
+      const band = SRC_ORDER.indexOf(n.source);
+      const base = (band < 0 ? 3.5 : band) - (SRC_ORDER.length - 1) / 2;
+      const jitter = (((hashStr(n.id) >> 6) % 1000) / 1000 - 0.5);
+      n.z = base * 46 + jitter * (n.deco ? 340 : 120);
+    }
+  }
+
   function setGraph(data) {
     sim.setGraph(data.nodes, data.edges);
     tagLinkKinds(data.edges);
     rebuildIndexes();
+    assignDepth();
     // Warm-up so first paint is a constellation, not an explosion.
     sim.tick(reduced ? 500 : 140);
     if (reduced) sim.settle(400);
@@ -522,11 +610,12 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
     const prev = nodeById;
     for (const n of data.nodes) {
       const old = prev.get(n.id);
-      if (old) { n.x = old.x; n.y = old.y; n.vx = old.vx || 0; n.vy = old.vy || 0; }
+      if (old) { n.x = old.x; n.y = old.y; n.z = old.z; n.vx = old.vx || 0; n.vy = old.vy || 0; }
     }
     sim.setGraph(data.nodes, data.edges);
     tagLinkKinds(data.edges);
     rebuildIndexes();
+    assignDepth();
     // Re-point interaction state at the adopted node objects.
     if (selected) selected = nodeById.get(selected.id) || null;
     if (hover) hover = nodeById.get(hover.id) || null;
@@ -544,8 +633,39 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
 
   /* ---- camera ----------------------------------------------------------- */
 
-  function worldToScreen(x, y) { return [(x - cam.x) * cam.z + w / 2, (y - cam.y) * cam.z + h / 2]; }
-  function screenToWorld(sx, sy) { return [(sx - w / 2) / cam.z + cam.x, (sy - h / 2) / cam.z + cam.y]; }
+  /* 3D projection: yaw about the vertical axis, pitch about the horizontal,
+   * then perspective divide. Returns [sx, sy, f] where f is the perspective
+   * scale (≈1 at the focal plane, >1 near, <1 far) — callers use it for
+   * size/alpha depth attenuation and painter sorting. */
+  function worldToScreen(x, y, z = 0) {
+    const dx = x - cam.x, dy = y - cam.y, dz = z;
+    const cy0 = Math.cos(cam.yaw), sy0 = Math.sin(cam.yaw);
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const rx = dx * cy0 + dz * sy0;
+    const z1 = -dx * sy0 + dz * cy0;
+    const ry = dy * cp - z1 * sp;
+    const rz = dy * sp + z1 * cp;
+    const f = clamp(PERSP / (PERSP - rz), 0.42, 2.3);
+    return [w / 2 + rx * cam.z * f, h / 2 + ry * cam.z * f, f];
+  }
+  /* Approximate inverse (focal plane only) — used for pan math. */
+  function screenToWorld(sx, sy) {
+    const cy0 = Math.cos(cam.yaw), cp = Math.cos(cam.pitch);
+    return [(sx - w / 2) / (cam.z * (Math.abs(cy0) < 0.25 ? 0.25 * Math.sign(cy0 || 1) : cy0)) + cam.x,
+            (sy - h / 2) / (cam.z * cp) + cam.y];
+  }
+  /* Pan by a screen-space delta: invert the projection's linear part so the
+   * field follows the pointer at any orbit angle. */
+  function panBy(dxs, dys) {
+    const cy0 = Math.cos(cam.yaw), sy0 = Math.sin(cam.yaw);
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const gy = Math.abs(cy0) < 0.25 ? 0.25 * Math.sign(cy0 || 1) : cy0;
+    const dcx = -dxs / (cam.z * gy);
+    const dcy = (dxs * sy0 * sp - dys * gy) / (cam.z * gy * cp) * -1;
+    cam.x += dcx; cam.tx = cam.x;
+    cam.y -= dcy; cam.ty = cam.y;
+    dirty = true;
+  }
 
   function fitNodes(list, snap = false, pad = 90) {
     const vis = list.filter(visible);
@@ -559,7 +679,8 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
     const bh = Math.max(maxY - minY, 40) + pad * 2;
     cam.tx = (minX + maxX) / 2;
     cam.ty = (minY + maxY) / 2;
-    cam.tz = clamp(Math.min(w / bw, h / bh), 0.28, 2.4);
+    // 0.86: leave air for the perspective spread of near-plane nodes.
+    cam.tz = clamp(Math.min(w / bw, h / bh) * 0.86, 0.28, 2.4);
     if (snap || reduced) { cam.x = cam.tx; cam.y = cam.ty; cam.z = cam.tz; }
     framed = true;
     dirty = true;
@@ -720,7 +841,7 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
 
     const posOf = (n) => {
       const [ox, oy] = driftOffset(n, now);
-      return worldToScreen(n.x + ox, n.y + oy);
+      return worldToScreen(n.x + ox, n.y + oy, n.z || 0);
     };
 
     // ---- edges (three batches: semantic dim, link dim, bright)
@@ -820,11 +941,17 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       beams = alive;
     }
 
-    // ---- nodes
+    // ---- nodes (painter-sorted: far stars first, near stars over them)
+    const drawList = [];
     for (const n of sim.nodes) {
       if (!visible(n) || (n.temp && !n.sat)) continue;
-      const [x, y] = posOf(n);
-      if (x < -30 || y < -30 || x > w + 30 || y > h + 30) continue;
+      const [x, y, f] = posOf(n);
+      if (x < -40 || y < -40 || x > w + 40 || y > h + 40) continue;
+      drawList.push([f, x, y, n]);
+    }
+    drawList.sort((a, b) => a[0] - b[0]);
+    for (const [f, x, y, n] of drawList) {
+      const depthFade = clamp(0.34 + 0.72 * (f - 0.42) / 0.9, 0.34, 1.08);
       const ig = igniteState(n.id, now);
       const isHover = n === hover;
       const isSel = n === selected;
@@ -832,8 +959,8 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       const nearHover = !hover || isHover || (hoverAdj && hoverAdj.has(n.id));
       const dim = (!inSpot || !nearHover);
 
-      let r = n.r * clamp(cam.z, 0.7, 1.6);
-      let alpha = n.deco ? 0.5 : 0.95;
+      let r = n.r * clamp(cam.z, 0.7, 1.6) * f;
+      let alpha = (n.deco ? 0.5 : 0.95) * depthFade;
       if (dim) alpha *= 0.22;
       const color = nodeColor(n);
       // Stars have magnitude: a stable per-node brightness class so the field
@@ -875,7 +1002,9 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       }
       g2d.globalAlpha = alpha * (0.5 + 0.34 * mag);
       g2d.fillStyle = color;
-      g2d.beginPath(); g2d.arc(x, y, r * (0.44 + 0.26 * mag), 0, TAU2); g2d.fill();
+      if (n.deco) { g2d.beginPath(); g2d.arc(x, y, r * (0.44 + 0.26 * mag), 0, TAU2); }
+      else traceGlyph(g2d, SRC_GLYPH[n.source] || 'circle', x, y, r * (0.44 + 0.26 * mag));
+      g2d.fill();
 
       if (isSel) {
         g2d.globalAlpha = 0.95;
@@ -912,8 +1041,8 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       const cent = new Map(); // source -> {x,y,c}
       for (const n of sim.nodes) {
         if (n.deco || !visible(n)) continue;
-        const c = cent.get(n.source) || { x: 0, y: 0, c: 0 };
-        c.x += n.x; c.y += n.y; c.c++;
+        const c = cent.get(n.source) || { x: 0, y: 0, z: 0, c: 0 };
+        c.x += n.x; c.y += n.y; c.z += (n.z || 0); c.c++;
         cent.set(n.source, c);
       }
       g2d.save();
@@ -923,7 +1052,7 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       g2d.textBaseline = 'middle';
       for (const [src, c] of cent) {
         if (c.c < 4) continue;
-        const [x, y] = worldToScreen(c.x / c.c, c.y / c.c);
+        const [x, y] = worldToScreen(c.x / c.c, c.y / c.c, c.z / c.c);
         if (x < -60 || y < -30 || x > w + 60 || y > h + 30) continue;
         const text = (SRC_LABEL[src] || src).toUpperCase();
         const fade = clamp((0.62 - cam.z) / 0.2, 0, 1);
@@ -962,9 +1091,12 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       return;
     }
     if (!sim.settled) sim.tick(1);
+    if (autoOrbit) cam.tyaw += 0.00012 * 16; // the observatory turns, slowly
     cam.x += (cam.tx - cam.x) * CAMERA_EASE;
     cam.y += (cam.ty - cam.y) * CAMERA_EASE;
     cam.z += (cam.tz - cam.z) * CAMERA_EASE;
+    cam.yaw += (cam.tyaw - cam.yaw) * CAMERA_EASE;
+    cam.pitch += (cam.tpitch - cam.pitch) * CAMERA_EASE;
     draw();
     raf = requestAnimationFrame(frame);
   }
@@ -1004,6 +1136,14 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
     visibleOf: visible,
     setHiddenPred(p) { hiddenPred = p; dirty = true; if (reduced) draw(); },
     setGrade(g) { grade = g; dirty = true; if (reduced) draw(); },
+    setAutoOrbit(on) { autoOrbit = !!on && !reduced; },
+    orbitBy(dyaw, dpitch) {
+      cam.tyaw += dyaw;
+      cam.tpitch = clamp(cam.tpitch + dpitch, -1.15, 1.15);
+      if (reduced) { cam.yaw = cam.tyaw; cam.pitch = cam.tpitch; draw(); }
+      dirty = true;
+    },
+    panBy,
     setHover(n) { if (hover !== n) { hover = n; if (reduced) draw(); } },
     getHover() { return hover; },
     setSelected(n) { selected = n; if (reduced) draw(); },
@@ -1016,8 +1156,15 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       else stopLoop();
     },
     hitTest(sx, sy) {
-      const [x, y] = screenToWorld(sx, sy);
-      return sim.find(x, y, 12 / cam.z, (n) => visible(n) && !n.deco && !(n.temp && !n.sat));
+      let best = null, bd = Infinity;
+      for (const n of sim.nodes) {
+        if (!visible(n) || n.deco || (n.temp && !n.sat)) continue;
+        const [px, py, f] = worldToScreen(n.x, n.y, n.z || 0);
+        const rr = Math.max(11, n.r * clamp(cam.z, 0.7, 1.6) * f + 5);
+        const d = (px - sx) * (px - sx) + (py - sy) * (py - sy);
+        if (d < rr * rr && d < bd) { bd = d; best = n; }
+      }
+      return best;
     },
     dims() { return [w, h]; },
   };
@@ -1078,6 +1225,7 @@ export function initSky(hostEl, ctx) {
     engine.setGrade(next === 'recede' ? 'dim' : 'full');
     canvas.classList.toggle('ko-canvas--grabbable', next === 'immersive');
     if (next !== 'immersive') { tooltip.hidden = true; engine.setHover(null); }
+    engine.setAutoOrbit(next === 'hero');
     if (next === 'hero') { engine.setFocal(0.5, 0.44); engine.fitAll(); }
     if (next === 'immersive') { engine.setFocal(0.5, 0.42); }
   }
@@ -1132,8 +1280,9 @@ export function initSky(hostEl, ctx) {
       const dx = e.clientX - last.x, dy = e.clientY - last.y;
       if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
       last = { x: e.clientX, y: e.clientY };
-      engine.cam.x -= dx / engine.cam.z; engine.cam.tx = engine.cam.x;
-      engine.cam.y -= dy / engine.cam.z; engine.cam.ty = engine.cam.y;
+      // Drag orbits the volume (the 3D gesture); hold Shift to pan instead.
+      if (e.shiftKey) engine.panBy(dx, dy);
+      else engine.orbitBy(-dx * 0.0042, dy * 0.0034);
       if (engine.reduced) engine.draw();
       return;
     }
@@ -1142,7 +1291,7 @@ export function initSky(hostEl, ctx) {
     if (hit && hit.label) {
       tooltip.hidden = false;
       tooltip.textContent = hit.label;
-      const [nx, ny] = engine.worldToScreen(hit.x, hit.y);
+      const [nx, ny] = engine.worldToScreen(hit.x, hit.y, hit.z || 0);
       tooltip.style.left = nx + 'px';
       tooltip.style.top = ny + 'px';
       canvas.style.cursor = 'pointer';
@@ -1188,6 +1337,7 @@ export function initSky(hostEl, ctx) {
   bus.on('theme', () => engine.setTheme());
   bus.on('wiki:links-changed', () => { invalidateLinksIndex(); refresh(); });
 
+  engine.setAutoOrbit(true); // boots on home
   engine.setActive(true);
   return sky;
 }
@@ -1206,16 +1356,16 @@ export function initHome(sectionEl, ctx) {
       <h1>Watch your organization think.</h1>
       <p class="lede">Every light is something your organization knows — a doc, a memory, a meeting, a decision. Ask, and the evidence ignites.</p>
       <div class="ko-hero-cta">
-        <button type="button" class="btn btn--primary" id="koHeroAsk">Ask the constellation<kbd aria-hidden="true">⌘K</kbd></button>
-        <a class="btn" href="#graph">Enter the graph</a>
+        <a class="btn btn--sm" href="#graph">Enter the graph</a>
+        <a class="btn btn--sm" href="#library">Read the wiki</a>
+        <a class="btn btn--sm" href="#help">Help &amp; guide</a>
       </div>
     </div>
     <p class="ko-hero-status" role="status" aria-live="polite"></p>`;
 
   const status = sectionEl.querySelector('.ko-hero-status');
-  sectionEl.querySelector('#koHeroAsk').addEventListener('click', () => {
-    if (ctx.lens) ctx.lens.focus();
-  });
+  const heroAsk = sectionEl.querySelector('#koHeroAsk');
+  if (heroAsk) heroAsk.addEventListener('click', () => { if (ctx.lens) ctx.lens.focus(); });
 
   const renderStats = () => {
     const data = ctx.sky && ctx.sky.data;
@@ -1276,6 +1426,7 @@ export function initGraph(sectionEl, ctx) {
         <div class="ko-legend"></div>
       </fieldset>
       <div class="ko-graph-status" role="status" aria-live="polite"></div>
+      <p class="dim mono" style="margin:0; font-size:.7rem; letter-spacing:.05em;">drag orbit · shift+drag pan · wheel zoom</p>
     </div>
     <aside class="ko-float ko-float--inspector card--strong" hidden aria-live="polite" aria-label="Node inspector"></aside>`;
 
@@ -1328,12 +1479,11 @@ export function initGraph(sectionEl, ctx) {
       label.className = 'pill';
       label.innerHTML = `
         <input type="checkbox" ${sourceOff.has(key) ? '' : 'checked'} />
-        <span class="ko-dot" aria-hidden="true"></span>
+        <span class="ko-glyphwrap" aria-hidden="true">${glyphSvg(key)}</span>
         <span>${esc(SRC_LABEL[key] || key)}</span>
         <span class="dim">${count.toLocaleString()}</span>`;
-      const dot = label.querySelector('.ko-dot');
+      const dot = label.querySelector('.ko-glyphwrap');
       dot.style.color = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
-      dot.style.background = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
       label.dataset.off = sourceOff.has(key) ? '1' : '';
       const cb = label.querySelector('input');
       cb.addEventListener('change', () => {
@@ -1380,7 +1530,7 @@ export function initGraph(sectionEl, ctx) {
         <button type="button" class="btn btn--sm ko-close" aria-label="Close inspector">Close</button>
       </div>
       <div class="ko-pills">
-        <span class="pill"><span class="ko-dot" aria-hidden="true"></span>${esc(SRC_LABEL[key] || key)}</span>
+        <span class="pill"><span class="ko-glyphwrap" aria-hidden="true">${glyphSvg(key)}</span>${esc(SRC_LABEL[key] || key)}</span>
         <span class="pill">${esc(node.scope || 'global')}</span>
         ${node.collection ? `<span class="pill">${esc(node.collection)}</span>` : ''}
       </div>
@@ -1395,9 +1545,8 @@ export function initGraph(sectionEl, ctx) {
         <button type="button" class="btn btn--sm btn--primary" data-act="ask">Ask about this</button>
       </div>
     `;
-    const dot = inspector.querySelector('.ko-dot');
-    dot.style.color = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
-    dot.style.background = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
+    const dot = inspector.querySelector('.ko-glyphwrap');
+    if (dot) dot.style.color = `var(${SRC_TOKEN[key] || '--mu-canvas-star'})`;
 
     const closeBtn = inspector.querySelector('.ko-close');
     closeBtn.addEventListener('click', closeInspector);

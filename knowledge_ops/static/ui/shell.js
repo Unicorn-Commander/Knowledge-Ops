@@ -16,10 +16,10 @@ import { md, esc } from "./md.js";
 initTheme(); // apply persisted / preferred / ?theme= before anything renders
 
 const bus = createBus();
-const VIEWS = ["home", "ask", "library", "review", "files", "sources", "graph", "ops"];
+const VIEWS = ["home", "ask", "library", "review", "files", "sources", "graph", "ops", "help"];
 const VIEW_LABEL = {
   home: "", ask: "Ask", library: "Library", review: "Review",
-  files: "Files", sources: "Sources", graph: "Graph", ops: "Operations",
+  files: "Files", sources: "Sources", graph: "Graph", ops: "Operations", help: "Help",
 };
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -154,6 +154,7 @@ const LOADERS = {
   files: () => import("./views/files.js").then((m) => m.init),
   sources: () => import("./views/sources.js").then((m) => m.init),
   ops: () => import("./views/ops.js").then((m) => m.init),
+  help: () => import("./views/help.js").then((m) => m.init),
 };
 
 async function bootView(name) {
