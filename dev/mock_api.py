@@ -15,6 +15,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +32,7 @@ def iso(days=0, hours=0):
 
 # ---------------------------------------------------------------- wiki corpus
 DOCS = [
+    ("Home.md", "Home"),
     ("marketing/Magic-Unicorn-Marketing-Bible.md", "Magic Unicorn — Marketing & Brand Bible (v1)"),
     ("ai-platform/Model-Eval-AO-Worker-2026-07.md", "Model Eval: AO Worker Task-Group (2026-07-13/14)"),
     ("ai-platform/Qwen-First-Certification-Loop.md", "Qwen-First Model Certification Loop (P-00110)"),
@@ -110,9 +112,287 @@ Supersedes the 2026-06 draft. Review due quarterly.
 """
 
 
+# Per-doc bodies carrying the wiki link web. [[Launch Retrospective]] and
+# [[Diarization Bench Notes]] are deliberately MISSING targets; the personal
+# folly-beach doc is the deliberate ORPHAN (no links in, no links out — it
+# falls through to the generic DOC_BODY template, which has no wikilinks).
+WIKI_BODIES = {
+    "Home.md": """# Home
+
+Welcome to the Knowledge-Ops wiki — the governed, versioned front door to
+everything the org has decided. Start here, follow the links.
+
+## Start here
+
+- [[Magic-Unicorn-Marketing-Bible|Marketing & Brand Bible]] — voice, palette,
+  and the rules every public word obeys.
+- [[Majiks-Launch-Runbook]] — the live launch playbook for the Majiks suite.
+- [[Meeting-Ops-Launch-Readiness|Meeting-Ops launch readiness]] — signup E2E
+  status and the $1 real-card gate.
+- [[gpu-fleet-service-map|GPU fleet service map]] — who runs what, and where.
+
+## How this wiki stays healthy
+
+Refresh and review are automated — see
+[[knowledge-ops-refresh-cadence|the refresh cadence]] for the 24h loop and
+deletion propagation. Identity and session plumbing is documented in
+[Suite SSO: brokered IdP tokens](engineering/suite-sso-brokered-idp-tokens.md).
+
+## Ground rules
+
+- Evidence-first: retrieval is heuristic, never presented as verified fact.
+- Every revision kept, every change recorded.
+""",
+    "marketing/Magic-Unicorn-Marketing-Bible.md": """# Magic Unicorn — Marketing & Brand Bible (v1)
+
+> Governed document — every revision kept, every change recorded.
+
+## Voice
+
+Confident, technical, a little playful. We show working software, not
+adjectives. Public claims must trace to a shipped artifact.
+
+## Properties
+
+The full domain and agent inventory lives in the
+[[Magic-Unicorn-Web-Property-Map-and-Agent-Topology|web property map]].
+Launch-facing copy for the music suite follows the
+[[Majiks-Launch-Runbook]].
+
+## Post-launch
+
+Lessons learned are collected in the [[Launch Retrospective]] after each
+release train closes.
+""",
+    "ai-platform/Model-Eval-AO-Worker-2026-07.md": """# Model Eval: AO Worker Task-Group (2026-07-13/14)
+
+## Result
+
+The AO worker task-group is **CERTIFIED-local** on qwen3.6-35b-a3b. The
+certification procedure is defined in the
+[[Qwen-First Model Certification Loop (P-00110)]].
+
+## Routing
+
+Candidate work enters through the routes in
+[[gateway-canonical-inference]]; hardware placement per the
+[[gpu-fleet-service-map]].
+
+## Caveat
+
+Lane-alias flip awaits an explicit go. Evidence-first: these scores are
+retrieval-ranked triage, not verification.
+""",
+    "ai-platform/Qwen-First-Certification-Loop.md": """# Qwen-First Model Certification Loop (P-00110)
+
+## Doctrine
+
+Local first, always. A task-group runs on the local lane until the loop
+certifies or rejects it; only then may a cloud lane be considered.
+
+## Procedure
+
+1. Freeze the task-group prompt set.
+2. Run the batch on the local lane via [[gateway-canonical-inference]].
+3. Score against the frontier baseline — see the latest
+   [AO worker eval](ai-platform/Model-Eval-AO-Worker-2026-07.md).
+4. Record `ko.grounding.assessments` after each batch.
+
+## Exit criteria
+
+Two consecutive certified batches, no regression on the held-out set.
+""",
+    "apps/Majiks-Launch-Runbook.md": """# Majiks Launch Runbook
+
+## Before launch
+
+- Copy and assets conform to the [[Magic-Unicorn-Marketing-Bible|Brand Bible]].
+- Inference routes warm — verify against [[gateway-canonical-inference]].
+- Cross-check the sibling checklist in [[Meeting-Ops-Launch-Readiness]].
+
+## Launch day
+
+Flip DNS, watch error budgets, keep the rollback tag pinned. Free-vault
+search must return in <300ms at p95.
+
+## After
+
+File everything into the [[Launch Retrospective]] within 48h.
+""",
+    "engineering/meeting-ops-inference-pipeline.md": """# Inference pipeline: concurrent diarization + 24k-slot summary tuning
+
+## Topology
+
+Diarization and summarization run concurrently; slot budget is 24k. GPU
+placement follows the [[gpu-fleet-service-map]].
+
+## Tuning notes
+
+Median-under-load is the gate metric — a green mean hides tail collapse.
+Raw runs are parked in the [[Diarization Bench Notes]].
+
+## Launch linkage
+
+This pipeline is a hard dependency of [[Meeting-Ops-Launch-Readiness]].
+""",
+    "apps/Cognitive-Companion.md": """# Cognitive Companion (LtCol Katie / LtCol MacKenzie)
+
+## Purpose
+
+A memory-support companion for cognitive-decline use cases. PHI-adjacent:
+all inference stays on our own GPUs.
+
+## Auth
+
+Sign-in is brokered through the suite —
+[[suite-sso-brokered-idp-tokens|Suite SSO]] — no app-local passwords.
+
+## Inference
+
+Routes through [[gateway-canonical-inference]] with the PHI gate closed to
+cloud fallback.
+""",
+    "engineering/knowledge-ops-refresh-cadence.md": """# Knowledge-Ops refresh cadence and deletion propagation
+
+## Cadence
+
+Every 24h the `wiki-review` job re-scans the corpus; findings land in the
+memory-quality queue. The [[Home]] page links the queues.
+
+## Deletion propagation
+
+Deletes fan out through the outbox to every federated source owner; failed
+tasks are redriven, never dropped.
+
+## Evidence policy
+
+Grounding verdicts follow the certification loop — see the
+[[Model-Eval-AO-Worker-2026-07|latest model eval]] for current lane status.
+""",
+    "infrastructure/gpu-fleet-service-map.md": """# GPU fleet service map
+
+## Nodes
+
+bigboy (3090 primary lane), midboy, legacy1 (2×P40 standby), UC-1. The
+canonical route table is [[gateway-canonical-inference]].
+
+## Network
+
+Node reachability and ACLs are managed per the
+[[headscale-acl-workflow]].
+
+## Rule
+
+Verify the RUNNING artifact — a stale image pin makes deploys silent no-ops.
+""",
+    "infrastructure/headscale-acl-workflow.md": """# Headscale ACL change workflow
+
+## Workflow
+
+1. Edit the ACL in the repo, never live.
+2. Dry-run against current peers.
+3. Apply, then probe from BOTH sides of the changed edge.
+
+## Blast radius
+
+Every GPU node in the [[gpu-fleet-service-map]] rides these ACLs — a bad
+push strands inference traffic.
+""",
+    "marketing/Magic-Unicorn-Web-Property-Map-and-Agent-Topology.md": """# Magic Unicorn Web Property Map & Agent Topology
+
+## Domains
+
+Apex plus many CNAME subdomains — repointing the apex breaks ALL of them.
+Copy on every property follows the
+[[Magic Unicorn — Marketing & Brand Bible (v1)|Brand Bible]].
+
+## Agent topology
+
+Suite agents authenticate via [[suite-sso-brokered-idp-tokens]]; each app
+also exposes an MCP surface for agent-first operation.
+""",
+    "ai-platform/gateway-canonical-inference.md": """# Gateway canonical inference routes
+
+## Canon
+
+One gateway, named lanes, no direct model URLs in app code. Aliases are
+pooled; metering is on, capping is not.
+
+## Placement
+
+Lane-to-hardware mapping lives in the [[gpu-fleet-service-map]].
+
+## Certification
+
+New task-groups enter through the
+[[Qwen-First-Certification-Loop|Qwen-first certification loop]] before any
+cloud lane is considered.
+""",
+    "engineering/suite-sso-brokered-idp-tokens.md": """# Suite SSO: brokered IdP tokens
+
+## Model
+
+Apps never hold provider credentials — Keycloak brokers the IdP and the
+suite exchanges short-lived tokens. Sessions ride an HttpOnly cookie.
+
+## Consumers
+
+Every gateway call is made on behalf of a brokered identity — see
+[[gateway-canonical-inference]] for how identity maps to lanes.
+""",
+    "apps/Meeting-Ops-Launch-Readiness.md": """# Meeting-Ops launch readiness (2026-07-15)
+
+## Status
+
+Signup E2E proven. Remaining gate: a $1 real-card charge end to end.
+
+## Dependencies
+
+- [[meeting-ops-inference-pipeline|Inference pipeline]] tuned and holding
+  its p95 under load.
+- Launch mechanics mirror the [[Majiks-Launch-Runbook]].
+
+## After launch
+
+Findings roll into the [[Launch Retrospective]].
+""",
+}
+
+# Bodies edited at runtime via kb.upsert_doc — /kb.links and /kb.graph
+# recompute from these, so edits stay consistent.
+MD_OVERRIDES = {}
+
+
+def get_body(row):
+    path = row["path"]
+    if path in MD_OVERRIDES:
+        return MD_OVERRIDES[path]
+    return WIKI_BODIES.get(path) or DOC_BODY.format(title=row["title"])
+
+
+def historical_body(row, version):
+    """Plausible older body for the versions listed in kb.doc_history (1..3).
+
+    v3 = current text; v2 drops the final section; v1 is the short first
+    draft. Each historical version carries a snapshot footer.
+    """
+    body = get_body(row)
+    if version >= 3 or version <= 0:
+        return body
+    sections = body.split("\n## ")
+    if version == 2:
+        kept = sections[:-1] if len(sections) > 2 else sections
+        note = "before the July revision tightened the operating sections"
+    else:
+        kept = sections[:2]
+        note = "initial draft, prior to governance review"
+    out = "\n## ".join(kept).rstrip()
+    return f"{out}\n\n---\n\n*Historical snapshot — v{version} ({note}). Superseded.*"
+
+
 def full_doc(row):
     d = dict(row)
-    d["body"] = DOC_BODY.format(title=row["title"])
+    d["body"] = get_body(row)
     d["md"] = d["body"]
     d["valid_from"] = iso(days=60)
     d["valid_until"] = None
@@ -126,6 +406,77 @@ def find_doc(key):
         if key in (row["id"], row["path"]):
             return row
     return None
+
+
+# ---------------------------------------------------------------- wiki links
+# Same resolution order the frontend uses (see shared contract): exact title
+# (case-insensitive) → exact path → unique path-suffix → MISSING.
+WIKILINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
+MDLINK_RE = re.compile(r"\[([^\]]*)\]\(([^)\s]+\.md)\)")
+
+
+def resolve_wikilink(target):
+    t = target.strip().lower()
+    if not t:
+        return None
+    for row in DOC_ROWS:
+        if row["title"].lower() == t:
+            return row["path"]
+    for row in DOC_ROWS:
+        if row["path"].lower() in (t, t + ".md"):
+            return row["path"]
+    suffix_hits = [row["path"] for row in DOC_ROWS
+                   if row["path"].lower().endswith(("/" + t, "/" + t + ".md"))]
+    if len(suffix_hits) == 1:
+        return suffix_hits[0]
+    return None
+
+
+def resolve_mdlink(href):
+    # Regular markdown links to .md files count as wiki links (never missing).
+    h = href.strip().lstrip("./").lstrip("/")
+    while h.startswith("../"):
+        h = h[3:]
+    return resolve_wikilink(h)
+
+
+def compute_links():
+    """Recompute the wiki link graph from the doc bodies (regex, live).
+
+    Field names mirror knowledge_ops/graph_api.py /kb.links EXACTLY:
+    links[].{from_path,to_path,text}, missing[].{from_path,target},
+    orphans[] (docs never linked-TO — linking out does not rescue), count.
+    """
+    links, missing, linked_to = [], [], set()
+    seen_link, seen_miss = set(), set()
+    for row in DOC_ROWS:
+        src = row["path"]
+        body = get_body(row)
+        for m in WIKILINK_RE.finditer(body):
+            target = m.group(1).strip()
+            label = (m.group(2) or "").strip()
+            dst = resolve_wikilink(target)
+            if dst and dst != src:
+                linked_to.add(dst)  # self-links never rescue an orphan
+                if (src, dst) not in seen_link:
+                    seen_link.add((src, dst))
+                    links.append({"from_path": src, "to_path": dst,
+                                  "text": label or target})
+            elif not dst and (src, target.lower()) not in seen_miss:
+                seen_miss.add((src, target.lower()))
+                missing.append({"from_path": src, "target": target})
+        for m in MDLINK_RE.finditer(body):
+            label = m.group(1).strip()
+            dst = resolve_mdlink(m.group(2))
+            if dst and dst != src:
+                linked_to.add(dst)
+                if (src, dst) not in seen_link:
+                    seen_link.add((src, dst))
+                    links.append({"from_path": src, "to_path": dst,
+                                  "text": label or m.group(2)})
+    orphans = [row["path"] for row in DOC_ROWS if row["path"] not in linked_to]
+    return {"links": links, "missing": missing, "orphans": orphans,
+            "count": len(links)}
 
 
 # ---------------------------------------------------------------- passages
@@ -188,8 +539,7 @@ def search_passages(query, k=8):
 
 
 # ---------------------------------------------------------------- graph
-SRC_PLAN = [  # (collection, node count)
-    ("knowledge_ops_wiki", 40),
+SRC_PLAN = [  # (collection, node count) — wiki count is len(DOC_ROWS), live
     ("org_memory", 34),
     ("meeting_transcripts", 46),
     ("stable_documents", 20),
@@ -212,52 +562,67 @@ STABLE_TITLES = [
 
 
 def build_graph():
+    """Rebuilt on every /kb.graph request so wiki-link edges track doc edits.
+
+    Wiki nodes: exactly one per doc, ref = doc path. Wiki↔wiki edges are the
+    resolved link web (kind:'link', consistent with /kb.links); every other
+    edge is kind:'semantic'.
+    """
     rng = random.Random(20260727)
     nodes, edges = [], []
     by_coll = {}
+
+    # wiki: one node per doc, ref = path
+    wiki_ids = []
+    id_by_path = {}
+    for i, row in enumerate(DOC_ROWS):
+        nid = f"knowledge_ops_wiki:pt-{i}"
+        nodes.append({
+            "id": nid, "label": row["title"], "source": "knowledge_ops_wiki",
+            "collection": "knowledge_ops_wiki", "scope": row["scope"],
+            "size": 2 + (i * 7) % 4, "ref": row["path"],
+        })
+        wiki_ids.append(nid)
+        id_by_path[row["path"]] = nid
+    link_web = compute_links()
+    for link in link_web["links"]:
+        a, b = id_by_path.get(link["from_path"]), id_by_path.get(link["to_path"])
+        if a and b:
+            edges.append({"a": a, "b": b, "w": 1, "kind": "link"})
+
+    # other collections: chains + shortcuts, all semantic
     for coll, count in SRC_PLAN:
         ids = []
+        pool = {"org_memory": MEMORY_TITLES,
+                "meeting_transcripts": MEETING_TITLES,
+                "stable_documents": STABLE_TITLES}[coll]
         for i in range(count):
             nid = f"{coll}:pt-{i}"
-            if coll == "knowledge_ops_wiki":
-                row = DOC_ROWS[i % len(DOC_ROWS)]
-                label = row["title"] if i < len(DOC_ROWS) else f"{row['title']} — rev {i}"
-                ref = row["path"]
-                scope = row["scope"]
-            else:
-                pool = {"org_memory": MEMORY_TITLES,
-                        "meeting_transcripts": MEETING_TITLES,
-                        "stable_documents": STABLE_TITLES}[coll]
-                label = f"{pool[i % len(pool)]} ({i + 1})"
-                ref = f"pt-{i}"
-                scope = "global"
             nodes.append({
-                "id": nid, "label": label, "source": coll, "collection": coll,
-                "scope": scope, "size": 1 + (i * 7 + len(coll)) % 5, "ref": ref,
+                "id": nid, "label": f"{pool[i % len(pool)]} ({i + 1})",
+                "source": coll, "collection": coll, "scope": "global",
+                "size": 1 + (i * 7 + len(coll)) % 5, "ref": f"pt-{i}",
             })
             ids.append(nid)
         by_coll[coll] = ids
-        # intra-collection chains + a few shortcuts
         for a, b in zip(ids, ids[1:]):
-            edges.append({"a": a, "b": b, "w": round(0.4 + rng.random() * 0.5, 2)})
+            edges.append({"a": a, "b": b, "kind": "semantic",
+                          "w": round(0.4 + rng.random() * 0.5, 2)})
         for _ in range(count // 4):
             a, b = rng.sample(ids, 2)
-            edges.append({"a": a, "b": b, "w": round(0.3 + rng.random() * 0.4, 2)})
+            edges.append({"a": a, "b": b, "kind": "semantic",
+                          "w": round(0.3 + rng.random() * 0.4, 2)})
     # cross-source: wiki docs anchor meetings/memory/stable evidence
-    wiki = by_coll["knowledge_ops_wiki"]
     for coll in ("org_memory", "meeting_transcripts", "stable_documents"):
         for nid in by_coll[coll][:: 3]:
-            edges.append({"a": rng.choice(wiki), "b": nid,
+            edges.append({"a": rng.choice(wiki_ids), "b": nid, "kind": "semantic",
                           "w": round(0.55 + rng.random() * 0.3, 2)})
     return {
         "nodes": nodes,
         "edges": edges,
         "stats": {"node_count": len(nodes), "edge_count": len(edges),
-                  "collections": [c for c, _ in SRC_PLAN]},
+                  "collections": ["knowledge_ops_wiki"] + [c for c, _ in SRC_PLAN]},
     }
-
-
-GRAPH = build_graph()
 
 # ---------------------------------------------------------------- fixed payloads
 STATS = {"sources": [
@@ -272,7 +637,8 @@ STATS = {"sources": [
 ]}
 
 LIST_SOURCES = {"sources": [
-    {"name": "wiki", "enabled": True, "status": "ok", "detail": "sqlite wiki store, 14 governed docs"},
+    {"name": "wiki", "enabled": True, "status": "ok",
+     "detail": f"sqlite wiki store, {len(DOC_ROWS)} governed docs"},
     {"name": "qdrant", "enabled": True, "status": "ok", "detail": "4 collections · 2,518 points"},
     {"name": "file_index", "enabled": True, "status": "ok", "detail": "512 chunks over /srv/shared"},
     {"name": "falkordb", "enabled": True, "status": "configured", "detail": "org_graph awaiting population"},
@@ -495,7 +861,9 @@ class Handler(BaseHTTPRequestHandler):
                 "is_admin": admin,
             })
         if p == "/kb.graph":
-            return self.send_json(GRAPH)
+            return self.send_json(build_graph())
+        if p == "/kb.links":
+            return self.send_json(compute_links())
         if p == "/kb.stats":
             return self.send_json(STATS)
         if p == "/kb.docs":
@@ -510,9 +878,20 @@ class Handler(BaseHTTPRequestHandler):
                 {"version_id": 1, "created_at": iso(days=44), "bytes": 2610},
             ]})
         if p == "/kb.doc_version":
-            row = find_doc(q.get("id") or "")
-            body = (full_doc(row)["body"] if row else "") + "\n\n*(historical snapshot)*"
-            return self.send_json({"version": {"version_id": q.get("version_id"), "body": body}})
+            row = find_doc(q.get("id") or q.get("path") or "")
+            try:
+                v = int(q.get("version_id") or q.get("version") or 0)
+            except ValueError:
+                v = 0
+            body = historical_body(row, v) if row else ""
+            created = iso(days={1: 44, 2: 9}.get(v, 1))
+            # Field names mirror knowledge_ops/graph_api.py /kb.doc_version.
+            return self.send_json({"version": {
+                "version_id": v or None, "version": v or None,
+                "doc_id": (row or {}).get("id"), "body": body,
+                "created_at": created, "saved_at": created,
+                "bytes": len(body),
+            }})
         if p == "/kb.list_sources":
             return self.send_json(LIST_SOURCES)
         if p == "/kb.audit":
@@ -580,6 +959,10 @@ class Handler(BaseHTTPRequestHandler):
                 title = os.path.splitext(os.path.basename(path))[0].replace("-", " ")
                 row = doc_row(path, title, len(DOC_ROWS))
                 DOC_ROWS.append(row)
+            if body.get("md") is not None:
+                # keep /kb.links + /kb.graph consistent with the saved body
+                MD_OVERRIDES[row["path"]] = body["md"]
+            row["updated_at"] = iso()
             return self.send_json({"id": row["id"]})
         if p == "/kb.delete_doc":
             return self.send_json({"deletion": {"doc_id": q.get("id"), "state": "tombstoned",

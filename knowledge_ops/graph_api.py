@@ -19,15 +19,21 @@ import time
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .adapters.falkordb import classify_graph
 from .adapters.qdrant import _visibility_filter
-from .authorization import Principal, can_read_record, validate_requested_scope
+from .authorization import (
+    AuthorizationError,
+    Principal,
+    can_read_record,
+    validate_requested_scope,
+)
 from .config import settings
 from .models import utcnow
-from .storage import connect
-from .wiki import list_docs
+from .storage import connect, init_db
+from .wiki import get_doc, list_docs
+from .wikilinks import build_link_graph
 
 logger = logging.getLogger("knowledge_ops.graph")
 
@@ -49,6 +55,11 @@ _CACHE: dict[tuple, tuple[float, dict]] = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_SECONDS = 600.0
 
+# The wiki link graph is far cheaper to build (one SQLite scan, no vector
+# stores) and must reflect edits promptly, so it lives in its own short cache.
+_LINKS_CACHE: dict[tuple, tuple[float, dict]] = {}
+_LINKS_TTL_SECONDS = 60.0
+
 _INTRA_EDGE_NODES = 60  # recommend() fan-out per collection
 _INTRA_EDGE_K = 4
 _CROSS_EDGE_NODES = 30  # wiki vectors searched against the other collections
@@ -67,21 +78,34 @@ def _cache_key(principal: Principal, scope: str | None) -> tuple:
     )
 
 
-def _cache_get(key: tuple) -> dict | None:
+def _cache_get(key: tuple, cache: dict | None = None) -> dict | None:
+    store = _CACHE if cache is None else cache
     with _CACHE_LOCK:
-        entry = _CACHE.get(key)
+        entry = store.get(key)
         if entry is None:
             return None
         expires_at, value = entry
         if expires_at <= time.time():
-            _CACHE.pop(key, None)
+            store.pop(key, None)
             return None
         return value
 
 
-def _cache_put(key: tuple, value: dict) -> None:
+def _cache_put(key: tuple, value: dict, cache: dict | None = None, ttl: float | None = None) -> None:
+    store = _CACHE if cache is None else cache
     with _CACHE_LOCK:
-        _CACHE[key] = (time.time() + _CACHE_TTL_SECONDS, value)
+        store[key] = (time.time() + (ttl if ttl is not None else _CACHE_TTL_SECONDS), value)
+
+
+def invalidate_link_caches() -> None:
+    """Drop cached link + constellation graphs after a wiki doc save/delete.
+
+    The full graph cache embeds ``kind='link'`` edges, so it must fall with the
+    link graph — otherwise a save would take up to 10 minutes to appear.
+    """
+    with _CACHE_LOCK:
+        _LINKS_CACHE.clear()
+        _CACHE.clear()
 
 
 # ---------------------------------------------------------------- qdrant helpers
@@ -104,13 +128,19 @@ def _node_from_point(coll: str, point: dict) -> dict:
     label = str(
         payload.get("title") or payload.get("filename") or text[:60].strip() or pid
     )
-    ref = (
+    ref = str(
         payload.get("wikipath")
         or payload.get("path")
         or payload.get("source_file")
         or payload.get("uid")
         or str(pid)
     )
+    if "wiki" in coll.lower():
+        # Wiki node refs must equal the doc's wiki-relative path so the
+        # frontend (and the link-edge join below) can map paths -> node ids.
+        base = str(settings.wiki_dir).rstrip("/") + "/"
+        if ref.startswith(base):
+            ref = ref[len(base):]
     return {
         "id": f"{coll}:{pid}",
         "label": label,
@@ -179,7 +209,57 @@ def _add_edges(
         if pair in seen:
             continue
         seen.add(pair)
-        edges.append({"a": a_id, "b": b_id, "w": round(float(hit.get("score") or 0), 4)})
+        edges.append({
+            "a": a_id, "b": b_id,
+            "w": round(float(hit.get("score") or 0), 4),
+            "kind": "semantic",
+        })
+
+
+# ---------------------------------------------------------------- wiki links
+def _visible_wiki_docs(principal: Principal, scope: str | None) -> list[dict]:
+    """Active wiki docs (path, title, body) the caller may read, in-process."""
+    init_db()
+    with connect() as db:
+        rows = db.execute(
+            """SELECT path, title, body, scope, owner FROM wiki_docs
+               WHERE lifecycle_state='active' ORDER BY path"""
+        ).fetchall()
+    return [doc for doc in (dict(row) for row in rows) if can_read_record(principal, doc, scope)]
+
+
+def _link_graph(principal: Principal, scope: str | None) -> dict:
+    """The parsed wiki link graph for this visibility identity (60s TTL)."""
+    key = ("links",) + _cache_key(principal, scope)
+    cached = _cache_get(key, cache=_LINKS_CACHE)
+    if cached is None:
+        cached = build_link_graph(_visible_wiki_docs(principal, scope))
+        _cache_put(key, cached, cache=_LINKS_CACHE, ttl=_LINKS_TTL_SECONDS)
+    return cached
+
+
+def _wiki_link_edges(nodes: list[dict], link_graph: dict) -> list[dict]:
+    """Join link-graph doc paths onto wiki-collection node refs.
+
+    Wiki docs are chunked into several points, so one path can map to several
+    node ids; every (a, b) pair is emitted once. Link edges may coexist with a
+    semantic edge over the same pair — the kinds render differently.
+    """
+    by_ref: dict[str, list[str]] = {}
+    for node in nodes:
+        if "wiki" in str(node.get("collection") or "").lower() and node.get("ref"):
+            by_ref.setdefault(str(node["ref"]), []).append(node["id"])
+    edges: list[dict] = []
+    seen: set[frozenset] = set()
+    for link in link_graph.get("links", []):
+        for a_id in by_ref.get(str(link["from_path"]), ()):
+            for b_id in by_ref.get(str(link["to_path"]), ()):
+                pair = frozenset((a_id, b_id))
+                if a_id == b_id or pair in seen:
+                    continue
+                seen.add(pair)
+                edges.append({"a": a_id, "b": b_id, "w": 1, "kind": "link"})
+    return edges
 
 
 # ---------------------------------------------------------------- falkordb helpers
@@ -322,6 +402,13 @@ async def kb_graph(
                             continue
                         _add_edges(edges, seen_pairs, known_ids, f"{coll}:{pid}", other, hits)
 
+    # Real wiki-link edges: doc paths from the parsed link graph joined onto
+    # wiki node refs. An unreadable wiki store thins the graph, never 500s.
+    try:
+        edges.extend(_wiki_link_edges(nodes, _link_graph(principal, scope)))
+    except Exception:
+        logger.debug("wiki link edges skipped", exc_info=True)
+
     falkor_stats: list[dict] = []
     if settings.enable_falkordb:
         try:
@@ -413,3 +500,57 @@ def kb_me(principal: GraphPrincipal) -> dict:
         "scopes": sorted(principal.scopes),
         "is_admin": principal.is_admin,
     }
+
+
+@router.get("/kb.links")
+def kb_links(principal: GraphPrincipal, scope: str | None = None) -> dict:
+    """The wiki link graph: resolved links, missing red-link targets, orphans.
+
+    Built in-process from the caller-visible slice of the wiki store and cached
+    for 60 seconds per visibility identity.
+    """
+    principal.require("read:knowledge")
+    validate_requested_scope(principal, scope)
+    graph = _link_graph(principal, scope)
+    return {
+        "links": graph["links"],
+        "missing": graph["missing"],
+        "orphans": graph["orphans"],
+        "count": len(graph["links"]),
+    }
+
+
+@router.get("/kb.doc_version")
+def kb_doc_version(
+    principal: GraphPrincipal,
+    id: str,
+    version_id: int | None = None,
+    version: int | None = None,
+) -> dict:
+    """A historical version body from the wiki store (reading-room timeline).
+
+    ``id`` accepts a doc id or path, mirroring /kb.get_doc; ``version_id``
+    matches the rows /kb.doc_history returns (``version`` is an alias).
+    """
+    principal.require("read:knowledge")
+    requested = version_id if version_id is not None else version
+    if requested is None:
+        raise ValueError("version_id is required")
+    doc = get_doc(id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document was not found")
+    if not can_read_record(principal, doc):
+        raise AuthorizationError("document is outside the caller's visibility")
+    with connect() as db:
+        row = db.execute(
+            """SELECT version_id, doc_id, body, created_at FROM wiki_versions
+               WHERE doc_id=? AND version_id=?""",
+            (doc["id"], int(requested)),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="version was not found")
+    record = dict(row)
+    record["version"] = record["version_id"]
+    record["saved_at"] = record["created_at"]
+    record["bytes"] = len(record["body"])
+    return {"version": record}

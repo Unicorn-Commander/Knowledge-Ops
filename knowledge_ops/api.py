@@ -379,12 +379,15 @@ def kb_upsert_doc(req: DocRequest, principal: ApiPrincipal) -> dict:
         review_due_at=req.review_due_at,
     )
     record_audit(principal.subject, "wiki.upsert", doc_id, "success", {"scope": scope, "path": req.path})
+    graph_api.invalidate_link_caches()
     return {"id": doc_id}
 
 
 @app.post("/kb.delete_doc")
 def kb_delete_doc(id: str, req: DeleteRequest, principal: ApiPrincipal) -> dict:
-    return {"deletion": tombstone_doc(id, principal=principal, reason=req.reason)}
+    deletion = tombstone_doc(id, principal=principal, reason=req.reason)
+    graph_api.invalidate_link_caches()
+    return {"deletion": deletion}
 
 
 @app.post("/kb.inspect_citation")

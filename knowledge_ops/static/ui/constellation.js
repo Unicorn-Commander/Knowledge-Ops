@@ -162,6 +162,11 @@ function ensureCss() {
 .ko-legend .pill:has(input:focus-visible) { outline: 2px solid var(--mu-color-primary); outline-offset: 2px; }
 .ko-legend .pill[data-off="1"] { opacity: .45; }
 .ko-dot { width: .65rem; height: .65rem; border-radius: 50%; flex: none; }
+.ko-edgekey { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; font-family: var(--mu-font-mono); font-size: .75rem; color: var(--mu-color-dim); }
+.ko-edgekey__item { display: inline-flex; align-items: center; gap: .4rem; }
+.ko-edgeline { width: 1.4rem; height: 0; border-top: 1px solid var(--mu-canvas-edge); opacity: .5; flex: none; }
+.ko-edgeline--link { opacity: 1; }
+.ko-linksline { font-family: var(--mu-font-mono); font-size: .78rem; font-variant-numeric: tabular-nums; color: var(--mu-color-muted); margin: 0; }
 .ko-inspector { pointer-events: auto; align-self: flex-start; margin-left: auto; width: min(360px, 90vw); max-height: calc(100% - 1rem); overflow: auto; display: flex; flex-direction: column; gap: .6rem; }
 .ko-inspector[hidden] { display: none; }
 .ko-inspector .ko-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
@@ -200,7 +205,14 @@ function normalizeGraph(g) {
     ref: n.ref || null,
     r: clamp(3.4 + 1.5 * Math.log2(1 + (Number(n.size) || 1)), 3.4, 13),
   }));
-  const edges = (g.edges || []).map((e) => ({ a: String(e.a), b: String(e.b), w: e.w }));
+  // Edge kinds: 'link' = real wiki links (solid, brighter, stronger spring so
+  // linked docs cluster truthfully); anything else — including edges with no
+  // kind at all — is 'semantic' (embedding neighbors, current subtle look).
+  const edges = (g.edges || []).map((e) => {
+    const kind = e.kind === 'link' ? 'link' : 'semantic';
+    const w = Number(e.w) || 1;
+    return { a: String(e.a), b: String(e.b), w: kind === 'link' ? w * 1.6 : w, kind };
+  });
   return { nodes, edges, stats: g.stats || null, kind: 'graph' };
 }
 
@@ -280,6 +292,46 @@ function buildAmbient(docs, statsSources) {
   }
 
   return { nodes, edges, stats: null, kind: docs && docs.length ? 'ambient' : 'deco' };
+}
+
+/* ---- /kb.links — lazy, cached once, invalidated on 'wiki:links-changed'.
+ * Resolves to a Map(docKey -> {in, out}) or null when the endpoint is absent
+ * (404 → the inspector simply omits its Links line). Shape-tolerant. */
+let _linksIndexPromise = null;
+
+function invalidateLinksIndex() { _linksIndexPromise = null; }
+
+function normalizeLinksIndex(res) {
+  const items = Array.isArray(res) ? res : (res && (res.links || res.edges)) || [];
+  const idx = new Map();
+  const bump = (key, dir) => {
+    const k = String(key);
+    if (!k) return;
+    const c = idx.get(k) || { in: 0, out: 0 };
+    c[dir]++;
+    idx.set(k, c);
+  };
+  for (const l of items) {
+    if (!l) continue;
+    // Backend shape (graph_api.py /kb.links) is from_path/to_path; the
+    // remaining aliases keep older/mocked shapes readable.
+    const from = l.from_path ?? l.from ?? l.source ?? l.a ?? l.src;
+    const to = l.to_path ?? l.to ?? l.target ?? l.b ?? l.dst;
+    if (from != null) bump(from, 'out');
+    if (to != null) bump(to, 'in');
+  }
+  return idx;
+}
+
+function fetchLinksIndex(api) {
+  if (!_linksIndexPromise) {
+    _linksIndexPromise = api.get('/kb.links').then(normalizeLinksIndex).catch((e) => {
+      // 404 = feature not there; cache the absence. Transient errors: allow retry.
+      if (!(e && e.status === 404)) _linksIndexPromise = null;
+      return null;
+    });
+  }
+  return _linksIndexPromise;
 }
 
 async function loadConstellation(api) {
@@ -407,8 +459,22 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     }
   }
 
+  // The sim builds its own link records ({s,t,w,rest}); carry each edge's
+  // kind over so the renderer can tell real wiki links from semantic ones.
+  // Edges added later without a kind (temp satellites) stay untagged → semantic.
+  function tagLinkKinds(edges) {
+    const km = new Set();
+    for (const e of edges || []) {
+      if (e.kind === 'link') { km.add(e.a + '\u0001' + e.b); km.add(e.b + '\u0001' + e.a); }
+    }
+    for (const l of sim.links) {
+      l.kind = km.has(l.s.id + '\u0001' + l.t.id) ? 'link' : 'semantic';
+    }
+  }
+
   function setGraph(data) {
     sim.setGraph(data.nodes, data.edges);
+    tagLinkKinds(data.edges);
     rebuildIndexes();
     // Warm-up so first paint is a constellation, not an explosion.
     sim.tick(reduced ? 500 : 140);
@@ -417,6 +483,30 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     if (w > 2) { fitAll(true); }
     dirty = true;
     if (reduced) draw();
+  }
+
+  /** Background refresh: adopt new data but keep positions for ids we already
+   * have, so the layout morphs instead of resetting. Camera stays put. */
+  function morphTo(data) {
+    const prev = nodeById;
+    for (const n of data.nodes) {
+      const old = prev.get(n.id);
+      if (old) { n.x = old.x; n.y = old.y; n.vx = old.vx || 0; n.vy = old.vy || 0; }
+    }
+    sim.setGraph(data.nodes, data.edges);
+    tagLinkKinds(data.edges);
+    rebuildIndexes();
+    // Re-point interaction state at the adopted node objects.
+    if (selected) selected = nodeById.get(selected.id) || null;
+    if (hover) hover = nodeById.get(hover.id) || null;
+    if (reduced) {
+      sim.settle(400);
+      draw();
+    } else {
+      // setGraph reheats to 0.9; calm it down so the morph is a drift, not a bang.
+      sim.alpha = 0.25;
+    }
+    dirty = true;
   }
 
   function visible(n) { return !(hiddenPred && hiddenPred(n)); }
@@ -602,9 +692,12 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
       return worldToScreen(n.x + ox, n.y + oy);
     };
 
-    // ---- edges (two batches: dim + bright)
+    // ---- edges (three batches: semantic dim, link dim, bright)
+    // Real wiki links draw solid at higher alpha; semantic (embedding)
+    // neighbors keep the current subtle treatment. Same token color, no glow.
     g2d.lineWidth = 1;
     const brightEdges = [];
+    const linkEdges = [];
     g2d.beginPath();
     for (const l of sim.links) {
       if (!visible(l.s) || !visible(l.t)) continue;
@@ -612,13 +705,26 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
         (hover && (l.s === hover || l.t === hover)) ||
         (spot && spot.has(l.s.id) && spot.has(l.t.id));
       if (isBright) { brightEdges.push(l); continue; }
+      if (l.kind === 'link') { linkEdges.push(l); continue; }
       const [x1, y1] = posOf(l.s);
       const [x2, y2] = posOf(l.t);
       g2d.moveTo(x1, y1); g2d.lineTo(x2, y2);
     }
-    g2d.globalAlpha = (hover || spot) ? dimStrength : clamp(0.5 + theme.glow * 0.2, 0.4, 0.8);
+    const baseEdgeAlpha = clamp(0.5 + theme.glow * 0.2, 0.4, 0.8);
+    g2d.globalAlpha = (hover || spot) ? dimStrength : baseEdgeAlpha;
     g2d.strokeStyle = theme.edge;
     g2d.stroke();
+    if (linkEdges.length) {
+      g2d.beginPath();
+      for (const l of linkEdges) {
+        const [x1, y1] = posOf(l.s);
+        const [x2, y2] = posOf(l.t);
+        g2d.moveTo(x1, y1); g2d.lineTo(x2, y2);
+      }
+      g2d.globalAlpha = (hover || spot) ? dimStrength : clamp(baseEdgeAlpha + 0.25, 0, 0.95);
+      g2d.strokeStyle = theme.edge;
+      g2d.stroke();
+    }
     if (brightEdges.length) {
       g2d.beginPath();
       for (const l of brightEdges) {
@@ -781,6 +887,7 @@ function createEngine(stageEl, canvas, ctx, opts = {}) {
     get adjacency() { return adjacency; },
     get nodeById() { return nodeById; },
     setGraph,
+    morphTo,
     setTheme,
     resize,
     draw,
@@ -935,6 +1042,20 @@ export function initHome(sectionEl, ctx) {
   bus.on('constellation:focus', ({ ids } = {}) => engine.spotlight(ids || []));
   bus.on('theme', () => engine.setTheme());
 
+  // A doc save changed wiki links: refetch the graph in the background and
+  // morph — existing nodes keep their positions, no full reset.
+  let homeRefreshing = false;
+  bus.on('wiki:links-changed', async () => {
+    invalidateLinksIndex();
+    if (homeRefreshing) return;
+    homeRefreshing = true;
+    try {
+      const g = await api.get('/kb.graph');
+      if (g && Array.isArray(g.nodes) && g.nodes.length) engine.morphTo(normalizeGraph(g));
+    } catch { /* keep the current sky */ }
+    finally { homeRefreshing = false; }
+  });
+
   // Activity: run only while #home (or empty hash) is the route.
   const routeCheck = () => {
     const hash = (location.hash || '#home').replace('#', '');
@@ -1005,6 +1126,22 @@ export function initGraph(sectionEl, ctx) {
 
   /* ---- legend + scope chrome ------------------------------------------- */
 
+  // Edge-type key: shown only when the graph actually carries real wiki-link
+  // edges, so the legend never describes something that isn't on the canvas.
+  function ensureEdgeKey(edges) {
+    const wrap = legendEl.parentElement;
+    const existing = wrap.querySelector('.ko-edgekey');
+    const hasLinks = (edges || []).some((e) => e.kind === 'link');
+    if (!hasLinks) { if (existing) existing.remove(); return; }
+    if (existing) return;
+    const row = document.createElement('div');
+    row.className = 'ko-edgekey';
+    row.innerHTML = `
+      <span class="ko-edgekey__item"><span class="ko-edgeline ko-edgeline--link" aria-hidden="true"></span>linked</span>
+      <span class="ko-edgekey__item"><span class="ko-edgeline" aria-hidden="true"></span>related</span>`;
+    wrap.appendChild(row);
+  }
+
   function buildChrome(data) {
     // sources present in the data, canonical order first
     const present = [...new Set(data.nodes.map((n) => n.source))];
@@ -1035,6 +1172,7 @@ export function initGraph(sectionEl, ctx) {
       });
       legendEl.appendChild(label);
     }
+    ensureEdgeKey(data.edges);
 
     const scopes = [...new Set(data.nodes.map((n) => n.scope || 'global'))].sort();
     const pairs = [['', 'All visible scopes']];
@@ -1074,6 +1212,7 @@ export function initGraph(sectionEl, ctx) {
         <span class="pill">${esc(node.scope || 'global')}</span>
         ${node.collection ? `<span class="pill">${esc(node.collection)}</span>` : ''}
       </div>
+      <p class="ko-linksline" hidden></p>
       <div class="ko-snippet"><span class="loading"><span class="spinner" aria-hidden="true"></span> Fetching context…</span></div>
       <div class="ko-neighbors-wrap">
         <p class="lbl">Nearby in the constellation <span class="dim">— related evidence, heuristic, not verification</span></p>
@@ -1104,6 +1243,23 @@ export function initGraph(sectionEl, ctx) {
       bus.emit('ask:run', { query: node.label || node.id, scope: null, k: 8 });
       location.hash = '#ask';
     });
+
+    // Wiki link counts (from /kb.links — lazy, cached; 404 → line omitted).
+    if (node.source === 'wiki' && !node.hub && !node.deco) {
+      fetchLinksIndex(api).then((idx) => {
+        if (!idx || inspector.hidden) return;
+        const sel = engine.getSelected();
+        if (!sel || sel.id !== node.id) return;
+        const el = inspector.querySelector('.ko-linksline');
+        if (!el) return;
+        const keys = [node.ref, node.id, String(node.id).replace(/^doc:/, '')].filter(Boolean);
+        let c = null;
+        for (const k of keys) { if (idx.has(String(k))) { c = idx.get(String(k)); break; } }
+        const cc = c || { in: 0, out: 0 };
+        el.textContent = `Links · ${cc.in} in · ${cc.out} out`;
+        el.hidden = false;
+      });
+    }
 
     // 1-hop neighbors
     const nbWrap = inspector.querySelector('.ko-neighbors');
@@ -1271,6 +1427,25 @@ export function initGraph(sectionEl, ctx) {
   bus.on('constellation:focus', ({ ids } = {}) => engine.spotlight(ids || []));
   bus.on('ask:results', ({ passages } = {}) => { engine.ignite(passages || []); });
   bus.on('theme', () => engine.setTheme());
+
+  // A doc save changed wiki links: drop the /kb.links cache, refetch the
+  // graph in the background, and morph in place (positions reused by id).
+  let graphRefreshing = false;
+  bus.on('wiki:links-changed', async () => {
+    invalidateLinksIndex();
+    if (graphRefreshing) return;
+    graphRefreshing = true;
+    try {
+      const g = await api.get('/kb.graph');
+      if (g && Array.isArray(g.nodes) && g.nodes.length) {
+        const data = normalizeGraph(g);
+        engine.morphTo(data);
+        ensureEdgeKey(data.edges);
+        announce();
+      }
+    } catch { /* keep the current sky */ }
+    finally { graphRefreshing = false; }
+  });
 
   const routeCheck = () => {
     engine.setActive((location.hash || '').replace('#', '') === 'graph');
