@@ -1091,7 +1091,7 @@ export function createEngine(stageEl, canvas, ctx, opts = {}) {
       return;
     }
     if (!sim.settled) sim.tick(1);
-    if (autoOrbit) cam.tyaw += 0.00012 * 16; // the observatory turns, slowly
+    if (autoOrbit) cam.tyaw += 0.00021 * 16; // the observatory turns, slowly
     cam.x += (cam.tx - cam.x) * CAMERA_EASE;
     cam.y += (cam.ty - cam.y) * CAMERA_EASE;
     cam.z += (cam.tz - cam.z) * CAMERA_EASE;
@@ -1223,7 +1223,7 @@ export function initSky(hostEl, ctx) {
     if (mode === next) return;
     mode = next;
     engine.setGrade(next === 'recede' ? 'dim' : 'full');
-    canvas.classList.toggle('ko-canvas--grabbable', next === 'immersive');
+    canvas.classList.toggle('ko-canvas--grabbable', next === 'immersive' || next === 'hero');
     if (next !== 'immersive') { tooltip.hidden = true; engine.setHover(null); }
     engine.setAutoOrbit(next === 'hero');
     if (next === 'hero') { engine.setFocal(0.5, 0.44); engine.fitAll(); }
@@ -1264,16 +1264,17 @@ export function initSky(hostEl, ctx) {
     engine.pointer.x = e.clientX; engine.pointer.y = e.clientY; engine.pointer.in = true;
   });
 
+  const handsOn = () => mode === 'immersive' || mode === 'hero';
   let dragging = false, dragMoved = false, last = { x: 0, y: 0 };
   canvas.addEventListener('pointerdown', (e) => {
-    if (mode !== 'immersive') return;
+    if (!handsOn()) return;
     dragging = true; dragMoved = false;
     last = { x: e.clientX, y: e.clientY };
     canvas.classList.add('ko-canvas--grabbing');
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (mode !== 'immersive') return;
+    if (!handsOn()) return;
     const sx = e.clientX, sy = e.clientY; // the host IS the viewport
     engine.pointer.x = sx; engine.pointer.y = sy; engine.pointer.in = true;
     if (dragging) {
@@ -1288,7 +1289,7 @@ export function initSky(hostEl, ctx) {
     }
     const hit = engine.hitTest(sx, sy);
     engine.setHover(hit);
-    if (hit && hit.label) {
+    if (hit && hit.label && mode === 'immersive') {
       tooltip.hidden = false;
       tooltip.textContent = hit.label;
       const [nx, ny] = engine.worldToScreen(hit.x, hit.y, hit.z || 0);
@@ -1301,12 +1302,18 @@ export function initSky(hostEl, ctx) {
     }
   });
   canvas.addEventListener('pointerup', (e) => {
-    if (mode !== 'immersive') { dragging = false; return; }
+    if (!handsOn()) { dragging = false; return; }
     canvas.classList.remove('ko-canvas--grabbing');
     if (dragging && !dragMoved) {
       const hit = engine.hitTest(e.clientX, e.clientY);
-      if (hit) bus.emit('sky:node', { node: hit });
-      else bus.emit('sky:background', {});
+      if (mode === 'immersive') {
+        if (hit) bus.emit('sky:node', { node: hit });
+        else bus.emit('sky:background', {});
+      } else if (hit) {
+        // Home: touching a star takes you into the graph, focused on it.
+        location.hash = '#graph';
+        setTimeout(() => { engine.focusNode(hit, 1.4); bus.emit('sky:node', { node: hit }); }, 480);
+      }
     }
     dragging = false;
   });
@@ -1315,7 +1322,7 @@ export function initSky(hostEl, ctx) {
     if (mode === 'immersive') { engine.setHover(null); tooltip.hidden = true; }
   });
   canvas.addEventListener('wheel', (e) => {
-    if (mode !== 'immersive') return;
+    if (!handsOn()) return;
     e.preventDefault();
     const factor = Math.exp(-e.deltaY * 0.0012);
     engine.cam.tz = clamp(engine.cam.tz * factor, 0.2, 3);

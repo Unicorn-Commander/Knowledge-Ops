@@ -184,6 +184,27 @@ async function boot() {
   if (themeHost) mountThemeMenu(themeHost, bus);
   wireReadout();
 
+  // Dock expand/collapse (persisted) — icons-only or icons+labels.
+  const dock = $("#dock"), dockToggle = $("#dockToggle");
+  if (dock && dockToggle) {
+    const apply = (on) => {
+      dock.classList.toggle("dock--expanded", on);
+      document.documentElement.classList.toggle("dock-open", on); // content shifts, not overlaps
+      dockToggle.setAttribute("aria-expanded", String(on));
+      dockToggle.setAttribute("aria-label", on ? "Collapse menu" : "Expand menu");
+      const lbl = dockToggle.querySelector(".dock__lbl");
+      if (lbl) lbl.textContent = on ? "Collapse" : "Expand";
+    };
+    let on = false;
+    try { on = localStorage.getItem("ko-dock") === "1"; } catch { /* private mode */ }
+    apply(on);
+    dockToggle.addEventListener("click", () => {
+      on = !dock.classList.contains("dock--expanded");
+      apply(on);
+      try { localStorage.setItem("ko-dock", on ? "1" : "0"); } catch { /* private mode */ }
+    });
+  }
+
   // Citation dialog (shared by ask/files views)
   const dlg = $("#citationDialog");
   if (dlg) {

@@ -5,7 +5,7 @@
 services:
   knowledge-ops:
     build: .
-    image: knowledge-ops:0.7.0
+    image: knowledge-ops:0.7.1
     container_name: knowledge-ops
     restart: unless-stopped
     read_only: true
@@ -45,7 +45,7 @@ services:
   knowledge-ops-worker:
     profiles: ["worker"]
     build: .
-    image: knowledge-ops:0.7.0
+    image: knowledge-ops:0.7.1
     container_name: knowledge-ops-worker
     restart: unless-stopped
     read_only: true

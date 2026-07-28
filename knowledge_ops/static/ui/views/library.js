@@ -976,6 +976,16 @@ export function init(sectionEl, ctx) {
   sectionEl.querySelector("#libNewBtn").addEventListener("click", () => renderEditor(null));
 
   /* ---------- reader ---------- */
+  // Browser Back/Forward inside the Library: pushState above records each
+  // opened doc; when the hash walks, mirror it (guarding on the loaded doc).
+  window.addEventListener("popstate", () => {
+    if (!(location.hash || "#library").startsWith("#library")) return;
+    const want = parseHashPath();
+    const have = state.doc && state.doc.path;
+    if (want && want !== have) openDoc(want, { updateHash: false });
+    else if (!want && have) { state.doc = null; renderHome(); }
+  });
+
   async function openDoc(idOrPath, { updateHash = true } = {}) {
     readerEl.setAttribute("aria-busy", "true");
     loading(readerEl, "opening document…");
@@ -990,8 +1000,11 @@ export function init(sectionEl, ctx) {
       }
       state.doc = doc;
       if (updateHash && doc.path) {
-        // replaceState does NOT fire hashchange, so no suppression flag is needed.
-        history.replaceState(null, "", "#library?path=" + encodeURIComponent(doc.path));
+        // pushState = the browser Back button walks the reading trail. It does
+        // not fire hashchange, so no suppression flag is needed; the popstate
+        // listener below guards on state.doc to avoid re-render loops.
+        const want = "#library?path=" + encodeURIComponent(doc.path);
+        if ((location.hash || "") !== want) history.pushState(null, "", want);
       }
       renderReader(doc);
       ensureVisible(doc.path);
@@ -1072,7 +1085,7 @@ export function init(sectionEl, ctx) {
     }));
     const homeCrumb = readerEl.querySelector("[data-crumb-home]");
     if (homeCrumb) homeCrumb.addEventListener("click", () => {
-      try { history.replaceState(null, "", "#library"); } catch { /* sandboxed */ }
+      try { if ((location.hash || "") !== "#library") history.pushState(null, "", "#library"); } catch { /* sandboxed */ }
       renderHome();
     });
     buildToc();

@@ -53,7 +53,15 @@ body {
 html[data-route] #sky { filter: brightness(0.4) saturate(0.72); }
 html[data-route="home"] #sky,
 html[data-route="graph"] #sky { filter: none; }
-html[data-route="graph"] #sky { pointer-events: auto; }
+html[data-route="graph"] #sky,
+html[data-route="home"] #sky { pointer-events: auto; }
+/* On bleed routes the pane host must NOT eat the sky's pointer events —
+   interactive overlays re-enable themselves explicitly. */
+html[data-route="home"] .main,
+html[data-route="graph"] .main { pointer-events: none; }
+html[data-route="home"] .main a, html[data-route="home"] .main button,
+html[data-route="home"] .main input, html[data-route="home"] .main [role],
+html[data-route="graph"] .main .ko-float { pointer-events: auto; }
 /* an ask just landed: lift the veil while the evidence burns */
 html[data-route] #sky.sky--ignited { filter: brightness(0.78) saturate(0.95); }
 html[data-route="home"] #sky.sky--ignited,
@@ -148,6 +156,15 @@ html[data-route="home"] .bar { background: transparent; border-bottom-color: tra
   background: color-mix(in srgb, var(--mu-color-primary) 16%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mu-color-primary) 35%, transparent);
 }
+.dock__lbl { display: none; font-size: .84rem; font-weight: 500; white-space: nowrap; }
+.dock--expanded { border-radius: var(--mu-radius-lg); }
+.dock--expanded .dock__btn { width: auto; min-width: 100%; justify-content: flex-start; display: flex; align-items: center; gap: .6rem; padding: 0 .9rem 0 .65rem; height: 2.55rem; border-radius: var(--mu-radius-md); }
+.dock--expanded .dock__lbl { display: inline; }
+.dock--expanded .dock__btn::before { display: none; } /* labels replace tooltips */
+.dock__toggle { margin-top: .2rem; color: var(--mu-color-dim); }
+.dock__toggle svg { transition: rotate var(--mu-dur-quick) var(--mu-ease-settle); }
+.dock--expanded .dock__toggle svg { rotate: 180deg; }
+
 /* pure-CSS tooltip from aria-label */
 .dock__btn::before {
   content: attr(aria-label);
@@ -170,7 +187,11 @@ html[data-route="home"] .bar { background: transparent; border-bottom-color: tra
   z-index: 10;
   padding: calc(var(--mu-bar-h) + 1.1rem) 1.2rem 7rem calc(var(--mu-dock-w) + 1.6rem);
   min-height: 100vh;
+  transition: padding-left var(--mu-dur-settle) var(--mu-ease-settle);
 }
+/* expanded dock pushes the panes instead of covering them */
+html.dock-open .main { padding-left: 13rem; }
+@media (max-width: 880px) { html.dock-open .main { padding-left: .8rem; } }
 
 .view { display: block; }
 .view[hidden] { display: none !important; }
@@ -191,6 +212,8 @@ html[data-route="home"] .bar { background: transparent; border-bottom-color: tra
 .view--bleed { max-width: none; background: transparent; box-shadow: none; padding: 0; }
 html[data-route="home"] .main,
 html[data-route="graph"] .main { padding-left: calc(var(--mu-dock-w) + 1.6rem); padding-bottom: 0; }
+html.dock-open[data-route="home"] .main,
+html.dock-open[data-route="graph"] .main { padding-left: 13rem; }
 
 /* ---------------------------------------------------------------- lens */
 
@@ -661,6 +684,8 @@ button.item { cursor: pointer; }
   .dock::-webkit-scrollbar { display: none; }
   .dock__btn { flex: none; }
   .dock__btn::before { display: none; }
+  .dock__lbl, .dock__toggle { display: none !important; }
+  .dock--expanded .dock__btn { width: 2.55rem; min-width: 0; padding: 0; display: grid; }
   .main { padding: calc(var(--mu-bar-h) + .9rem) .8rem 10.5rem .8rem; }
   html[data-route="home"] .main, html[data-route="graph"] .main { padding-left: .8rem; }
   .view:not(.view--bleed) { padding: 1.4rem 1.1rem 1.8rem; }
