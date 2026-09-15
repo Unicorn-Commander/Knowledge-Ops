@@ -88,16 +88,15 @@ jobs:
   # finding 3 needs CI to do. Nothing is suppressed: this job still fails on
   # HIGH/CRITICAL, stays visible on every PR, and still gates the registry publish.
   #
-  # Known RED as of 2026-09-15 (measured on bigboy against knowledge-ops:0.7.1,
-  # i.e. the image already running in BOTH rings — this job did not introduce them):
+  # The previous base/lock were RED on 2026-09-15. The dependency update pins
+  # sqlite-libs 3.53.4-r0 (in the Python base) and cryptography 50.0.0. Keep
+  # scanning the built image: a source update alone does not prove a clean image.
   #   sqlite-libs CVE-2026-11822 / CVE-2026-11824 — arbitrary code execution via
-  #     crafted FTS5 data. Knowledge-Ops search IS SQLite FTS5 over ingested
-  #     documents, so this one is squarely in the product's path. Fix = newer
-  #     alpine base (sqlite-libs >= 3.53.4-r0).
+  #     crafted FTS5 database data. Ordinary document ingestion alone does not
+  #     establish exploitability; upstream describes arbitrary SQL or a crafted
+  #     database as prerequisites. See https://www.sqlite.org/cves.html.
   #   cryptography 49.0.0 CVE-2026-69247 — Bleichenbacher oracle. Fix = 50.0.0.
-  # Both need a base-image digest bump and a requirements.lock regeneration, which
-  # is a deliberate dependency change and Aaron's call, not a side effect of a
-  # seed-corpus fix.
+  # Dependency changes remain separately reviewable from the seed-corpus fix.
   vuln-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 25
