@@ -20,6 +20,10 @@ COPY --chown=10001:10001 knowledge_ops ./knowledge_ops
 RUN pip install --no-deps .
 
 # App assets: wiki seed content + federation manifest.
+# WARNING: everything under wiki/ is copied to the /wiki VOLUME and ingested into
+# EVERY fresh instance by seed_wiki_from_disk() (knowledge_ops/api.py, every startup).
+# That includes every customer's per-org instance. Ship nothing internal here.
+# See wiki/README.txt and P-00099 finding 3 (2026-09-15).
 COPY --chown=10001:10001 wiki ./wiki
 COPY --chown=10001:10001 .well-known ./.well-known
 
