@@ -130,7 +130,7 @@ def test_nested_brackets_only_innermost_parses():
 
 def test_links_returned_in_document_order():
     md = "[md first](a.md) then [[Wiki Second]] then [md third](b.md)"
-    assert [l["target"] for l in parse_links(md)] == ["a.md", "Wiki Second", "b.md"]
+    assert [link["target"] for link in parse_links(md)] == ["a.md", "Wiki Second", "b.md"]
 
 
 # ================================================================ resolver
@@ -212,12 +212,12 @@ def _graph_docs():
 
 def test_link_graph_links_missing_and_orphans():
     graph = build_link_graph(_graph_docs())
-    assert {(l["from_path"], l["to_path"]) for l in graph["links"]} == {
+    assert {(link["from_path"], link["to_path"]) for link in graph["links"]} == {
         ("index.md", "apps/Majiks-Launch-Runbook.md"),
         ("index.md", "ops/notes.md"),
         ("apps/Majiks-Launch-Runbook.md", "index.md"),
     }
-    by_pair = {(l["from_path"], l["to_path"]): l["text"] for l in graph["links"]}
+    by_pair = {(link["from_path"], link["to_path"]): link["text"] for link in graph["links"]}
     assert by_pair[("apps/Majiks-Launch-Runbook.md", "index.md")] == "the index"  # first wins
     # Only unresolved WIKILINKS are missing; the dead md link is dropped silently.
     assert graph["missing"] == [{"from_path": "index.md", "target": "Nowhere"}]
@@ -231,12 +231,12 @@ def test_link_graph_orphans_and_code_fence_suppression():
     graph = build_link_graph(docs)
     assert graph["orphans"] == ["index.md"]
     # The fenced [[Home]] inside ops/notes.md stayed dead.
-    assert all(l["from_path"] != "ops/notes.md" for l in graph["links"])
+    assert all(link["from_path"] != "ops/notes.md" for link in graph["links"])
 
 
 def test_link_graph_dedupes_and_skips_self_links():
     graph = build_link_graph(_graph_docs())
-    pairs = [(l["from_path"], l["to_path"]) for l in graph["links"]]
+    pairs = [(link["from_path"], link["to_path"]) for link in graph["links"]]
     assert len(pairs) == len(set(pairs))  # deduped
     assert all(a != b for a, b in pairs)  # no self edges
 
@@ -302,7 +302,7 @@ def test_kb_links_respects_visibility(tmp_path, monkeypatch):
     ))
     with TestClient(app) as client:
         body = client.get("/kb.links").json()
-    froms = {l["from_path"] for l in body["links"]}
+    froms = {link["from_path"] for link in body["links"]}
     assert froms == {"mine.md"}  # someone-else's personal doc never leaks
     assert "theirs.md" not in body["orphans"]
     assert "mine.md" in body["orphans"]

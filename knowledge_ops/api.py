@@ -80,7 +80,17 @@ async def lifespan(app: FastAPI):
     try:
         seeded = seed_wiki_from_disk()
         if seeded:
-            logger.info("seeded %d wiki docs from %s", len(seeded), settings.wiki_dir)
+            logger.info(
+                "seeded %d wiki docs from %s (KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS=1)",
+                len(seeded),
+                settings.wiki_dir,
+            )
+        elif not settings.seed_internal_corpus:
+            logger.info(
+                "internal seed corpus ingestion is OFF "
+                "(KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS unset/0); %s not ingested",
+                settings.wiki_dir,
+            )
         repaired = sync_wiki_to_disk()
         if repaired:
             logger.warning("repaired %d wiki markdown projections from canonical storage", repaired)

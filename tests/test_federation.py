@@ -32,6 +32,11 @@ def _seed_tmp_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config.settings, "default_file_roots", [tmp_path])
     monkeypatch.setattr(config.settings, "default_personal_owner", "local-system")
     monkeypatch.setattr(config.settings, "api_require_auth", False)
+    # This helper exists to produce a wiki dir that HAS a seed corpus, so the
+    # internal-corpus gate belongs on for anything built on it. Automatic seeding
+    # defaults off in production (P-00099 finding 3) — see
+    # test_seed_corpus_is_off_unless_explicitly_enabled for that half.
+    monkeypatch.setattr(config.settings, "seed_internal_corpus", True)
     (wiki_dir / "marketing").mkdir(parents=True, exist_ok=True)
     (wiki_dir / "marketing" / "mu.md").write_text(
         "# Magic Unicorn\n\nMagic Unicorn builds sovereign AI you actually own — "
@@ -98,7 +103,8 @@ def test_ground_returns_cited_evidence(tmp_path, monkeypatch):
     from knowledge_ops.authorization import system_principal
     from knowledge_ops.wiki import seed_wiki_from_disk
 
-    seed_wiki_from_disk()
+    # Explicit: this test IS the internal-corpus case (P-00099 finding 3 gate).
+    seed_wiki_from_disk(allow_internal_corpus=True)
     res = asyncio.run(federation.ground(
         "What is Magic Unicorn?", scope="global", k=5, principal=system_principal()
     ))
@@ -182,3 +188,51 @@ def test_api_health_and_manifest_routes(tmp_path, monkeypatch):
         grounded = client.post("/kb.ground", json={"query": "What is Magic Unicorn?", "scope": "global"})
         assert grounded.status_code == 200
         assert grounded.json()["passages"]
+
+
+def test_seed_corpus_is_off_unless_explicitly_enabled(tmp_path, monkeypatch):
+    """P-00099 finding 3 regression: automatic seeding must default OFF.
+
+    seed_wiki_from_disk() writes scope=global owner=magic-unicorn rows, readable by
+    every principal on the instance. On 2026-09-15 the customer-facing deployment was
+    measured holding two Magic Unicorn internal documents put there by this path with
+    no human involved. The gate, not the emptiness of wiki/, is what makes that
+    unrepeatable — an empty wiki/ is one careless `cp` away from being full again.
+    """
+    import knowledge_ops.config as config
+    from knowledge_ops.wiki import list_docs, seed_wiki_from_disk
+
+    _seed_tmp_env(tmp_path, monkeypatch)
+
+    # Default: the flag is off, so a corpus sitting on disk is NOT ingested.
+    monkeypatch.setattr(config.settings, "seed_internal_corpus", False)
+    assert seed_wiki_from_disk() == []
+    assert list_docs() == [], "seed corpus was ingested with the gate off"
+
+    # Internal ring: the flag is on, so it is.
+    monkeypatch.setattr(config.settings, "seed_internal_corpus", True)
+    assert seed_wiki_from_disk(), "gate on but nothing seeded"
+    assert any(d["path"] == "marketing/mu.md" for d in list_docs())
+
+
+def test_seed_corpus_flag_defaults_off_in_settings():
+    """The DEFAULT must be off, not just off in this environment.
+
+    KNOWLEDGE_OPS_MCP_REQUIRE_JWT defaulting OPEN is how the same knowledge base
+    ended up unauthenticated on a customer host. A security default belongs in an
+    assertion, not in a deploy checklist.
+    """
+    import os
+
+    from knowledge_ops.config import Settings
+
+    for value in (None, "", "0", "false", "no"):
+        env = {k: v for k, v in os.environ.items() if k != "KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS"}
+        if value is not None:
+            env["KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS"] = value
+        real = os.environ
+        try:
+            os.environ = env  # type: ignore[assignment]
+            assert Settings().seed_internal_corpus is False, f"default not off for {value!r}"
+        finally:
+            os.environ = real  # type: ignore[assignment]

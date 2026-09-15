@@ -104,6 +104,14 @@ class Settings(BaseModel):
     # deployments name the granted agents explicitly for the picker.
     brigade_agents: str = os.getenv("KNOWLEDGE_OPS_BRIGADE_AGENTS", "")
 
+    # Image-baked wiki seed corpus. seed_wiki_from_disk() ingests EVERY *.md under
+    # wiki_dir into the KB as scope=global owner=magic-unicorn on every startup, so a
+    # single internal markdown file that reaches a customer host becomes a
+    # customer-readable KB row with no human in the loop. Defaults OFF: only the
+    # internal ring, which legitimately ships a corpus, sets this to 1.
+    # P-00099 finding 3, 2026-09-15 — measured live on the customer deployment.
+    seed_internal_corpus: bool = os.getenv("KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS", "0") == "1"
+
     enable_qdrant: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_QDRANT", "0") == "1"
     enable_center_deep: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_CENTER_DEEP", "0") == "1"
     enable_falkordb: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_FALKORDB", "0") == "1"

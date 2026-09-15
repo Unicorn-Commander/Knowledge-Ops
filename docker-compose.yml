@@ -24,6 +24,13 @@ services:
       KNOWLEDGE_OPS_DB: /data/knowledge_ops.sqlite3
       KNOWLEDGE_OPS_WIKI: /wiki
       KNOWLEDGE_OPS_OPENWIKI_STAGING: /data/openwiki/staging
+      # Image-baked seed corpus: OFF, and it stays off for every customer and
+      # per-org deploy. seed_wiki_from_disk() ingests every *.md under /wiki as
+      # scope=global owner=magic-unicorn, i.e. readable by everyone on the
+      # instance. On 2026-09-15 that had put two Magic Unicorn internal documents
+      # into the customer-facing KB with no human involved (P-00099 finding 3).
+      # Only the internal ring sets this to "1" — see docker-compose.bigboy.yml.
+      KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS: "0"
       # Explicit local-dev trust boundary: unauthenticated API is bound only to
       # 127.0.0.1 above. Production override resets this to authenticated.
       KNOWLEDGE_OPS_API_REQUIRE_AUTH: "0"

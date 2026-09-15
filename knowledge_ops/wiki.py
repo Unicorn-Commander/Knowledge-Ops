@@ -331,13 +331,25 @@ def ingest_marketing_docs() -> list[str]:
     return ids
 
 
-def seed_wiki_from_disk() -> list[str]:
+def seed_wiki_from_disk(*, allow_internal_corpus: bool | None = None) -> list[str]:
     """Ingest any ``*.md`` already present under ``wiki_dir`` into the DB.
 
     Idempotent and offline: used on service startup so a fresh data volume
     (empty SQLite) self-seeds from the markdown that ships in the repo, making
     grounded answers work without first running an ingest command.
+
+    GATED (P-00099 finding 3, 2026-09-15). This is a privileged write: it ingests
+    as ``scope=global owner=magic-unicorn``, which is readable by every principal
+    on the instance. Left ungated it turned any markdown that reached a customer
+    host into a customer-readable KB row — measured live on the customer-facing
+    deployment, where it had seeded two Magic Unicorn internal documents. It now
+    does nothing unless ``KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS=1`` (the internal ring)
+    or a caller passes ``allow_internal_corpus=True`` and means it.
     """
+    if allow_internal_corpus is None:
+        allow_internal_corpus = settings.seed_internal_corpus
+    if not allow_internal_corpus:
+        return []
     init_db()
     base = settings.wiki_dir
     if not base.exists():

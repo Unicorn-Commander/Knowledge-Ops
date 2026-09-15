@@ -27,6 +27,33 @@ RUN pip install --no-deps .
 COPY --chown=10001:10001 wiki ./wiki
 COPY --chown=10001:10001 .well-known ./.well-known
 
+# Build-time guard (P-00099 finding 3, 2026-09-15). wiki/ is a SHIPPING channel: it
+# is copied onto the /wiki VOLUME below and ingested into every instance's KB. The
+# 2026-09-15 finding was NOT that the repo held internal docs (it did) but that a
+# build could carry them to a customer host with nobody typing anything. A deploy
+# tree that legitimately holds the internal corpus on disk (bigboy) is exactly that
+# accident. So: an image with seed markdown in it can only be produced by asking for
+# it out loud. Default refuses and the build goes red.
+ARG KNOWLEDGE_OPS_SEED_CORPUS=none
+RUN set -eu; \
+    found="$(find /opt/knowledge-ops/wiki -name '*.md' | sort)"; \
+    if [ -n "$found" ] && [ "$KNOWLEDGE_OPS_SEED_CORPUS" != "internal" ]; then \
+        echo "================ BUILD REFUSED ================" >&2; \
+        echo "Seed markdown is present under wiki/ but this build did not pass" >&2; \
+        echo "  --build-arg KNOWLEDGE_OPS_SEED_CORPUS=internal" >&2; \
+        echo "Everything under wiki/ lands in EVERY instance's knowledge base as" >&2; \
+        echo "scope=global owner=magic-unicorn (see wiki/README.txt). Offending files:" >&2; \
+        echo "$found" >&2; \
+        exit 1; \
+    fi; \
+    printf 'seed corpus edition=%s files=%s\n' "$KNOWLEDGE_OPS_SEED_CORPUS" \
+        "$(printf '%s' "$found" | grep -c . || true)"
+
+# Inspectable edition marker, so a running container can be checked with
+# `docker inspect --format '{{index .Config.Labels "org.magicunicorn.knowledge-ops.seed-corpus"}}'`
+# instead of trusting a tag name like "-noseed".
+LABEL org.magicunicorn.knowledge-ops.seed-corpus="${KNOWLEDGE_OPS_SEED_CORPUS}"
+
 # Data (sqlite) lives on a mounted volume so it survives restarts/redeploys.
 RUN addgroup -S -g 10001 knowledgeops \
     && adduser -S -D -H -u 10001 -G knowledgeops -s /sbin/nologin knowledgeops \
