@@ -1,6 +1,10 @@
 # Knowledge-Ops — Magic Unicorn federated grounding layer
 FROM python:3.12.14-alpine3.23@sha256:167bc85084c9df34480efc26b4528fb68feaa8a79183b5658952137025b6f061
 
+# The pinned Python base retains an older util-linux subpackage. Pin the
+# Alpine security-fixed library explicitly; keep the image scan as the gate.
+RUN apk add --no-cache libuuid=2.41.6-r1
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
