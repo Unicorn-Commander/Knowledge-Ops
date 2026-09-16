@@ -76,14 +76,12 @@ jobs:
           docker run --rm "$IMAGE_ID" python -m knowledge_ops.cli evaluate-memory
           scripts/verify_container_operations.sh "$IMAGE_ID"
           docker save --output /tmp/knowledge-ops-ci.tar "$IMAGE_ID"
-          docker run --rm --volume /tmp:/scan \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            image --input /scan/knowledge-ops-ci.tar --format cyclonedx \
-            --output /scan/knowledge-ops.cdx.json --no-progress
+          scripts/scan_image_archive.sh /tmp/knowledge-ops-ci.tar /tmp/knowledge-ops.cdx.json \
+            --format cyclonedx --no-progress
           python -c 'import json; value=json.load(open("/tmp/knowledge-ops.cdx.json")); assert value["bomFormat"] == "CycloneDX" and value["components"]'
 
       - name: Upload production image SBOM
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2; Forgejo artifact protocol
         with:
           name: knowledge-ops-cyclonedx-sbom
           path: /tmp/knowledge-ops.cdx.json
@@ -132,10 +130,9 @@ jobs:
           test -n "$KO_IMAGE"
           docker image inspect "$KO_IMAGE" >/dev/null
           docker save --output /tmp/knowledge-ops-audit.tar "$KO_IMAGE"
-          docker run --rm --volume /tmp:/scan:ro \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            image --input /scan/knowledge-ops-audit.tar --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          scripts/scan_image_archive.sh /tmp/knowledge-ops-audit.tar /tmp/knowledge-ops-audit.txt \
+            --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          cat /tmp/knowledge-ops-audit.txt
 
   # Customer and vulnerability gates consume the same immutable image ID. The
   # existing runner shares its host Docker daemon between jobs; fail closed if
