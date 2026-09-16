@@ -20,6 +20,8 @@ jobs:
   test-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      image_id: ${{ steps.image.outputs.image_id }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -59,21 +61,27 @@ jobs:
             scripts/promote_customer_image.sh
 
       - name: Build and validate the production image
+        id: image
         run: |
-          docker build --tag knowledge-ops:ci .
-          docker run --rm knowledge-ops:ci python -m pip check
-          docker run --rm knowledge-ops:ci python -m knowledge_ops.cli evaluate-memory
-          docker tag knowledge-ops:ci knowledge-ops:0.4.0
-          scripts/verify_container_operations.sh knowledge-ops:0.4.0
-          docker save --output /tmp/knowledge-ops-ci.tar knowledge-ops:ci
-          docker run --rm --volume /tmp:/scan \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            image --input /scan/knowledge-ops-ci.tar --format cyclonedx \
-            --output /scan/knowledge-ops.cdx.json --no-progress
+          set -eu
+          SHA="$(git rev-parse HEAD)"
+          SHORT="$(git rev-parse --short=12 HEAD)"
+          docker build \
+            --label org.opencontainers.image.revision="$SHA" \
+            --label org.opencontainers.image.source="https://git.unicorncommander.ai/UnicornCommander/Knowledge-Ops" \
+            --tag "knowledge-ops:0.7.2-customer-$SHORT" .
+          IMAGE_ID="$(docker image inspect "knowledge-ops:0.7.2-customer-$SHORT" --format '{{.Id}}')"
+          echo "image_id=$IMAGE_ID" >> "$GITHUB_OUTPUT"
+          docker run --rm "$IMAGE_ID" python -m pip check
+          docker run --rm "$IMAGE_ID" python -m knowledge_ops.cli evaluate-memory
+          scripts/verify_container_operations.sh "$IMAGE_ID"
+          docker save --output /tmp/knowledge-ops-ci.tar "$IMAGE_ID"
+          scripts/scan_image_archive.sh /tmp/knowledge-ops-ci.tar /tmp/knowledge-ops.cdx.json \
+            --format cyclonedx --no-progress
           python -c 'import json; value=json.load(open("/tmp/knowledge-ops.cdx.json")); assert value["bomFormat"] == "CycloneDX" and value["components"]'
 
       - name: Upload production image SBOM
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2; Forgejo artifact protocol
         with:
           name: knowledge-ops-cyclonedx-sbom
           path: /tmp/knowledge-ops.cdx.json
@@ -88,19 +96,21 @@ jobs:
   # finding 3 needs CI to do. Nothing is suppressed: this job still fails on
   # HIGH/CRITICAL, stays visible on every PR, and still gates the registry publish.
   #
-  # Known RED as of 2026-09-15 (measured on bigboy against knowledge-ops:0.7.1,
-  # i.e. the image already running in BOTH rings — this job did not introduce them):
+  # The previous base/lock were RED on 2026-09-15. The dependency update pins
+  # sqlite-libs 3.53.4-r0 (in the Python base) and cryptography 50.0.0. Keep
+  # scanning the built image: a source update alone does not prove a clean image.
   #   sqlite-libs CVE-2026-11822 / CVE-2026-11824 — arbitrary code execution via
-  #     crafted FTS5 data. Knowledge-Ops search IS SQLite FTS5 over ingested
-  #     documents, so this one is squarely in the product's path. Fix = newer
-  #     alpine base (sqlite-libs >= 3.53.4-r0).
+  #     crafted FTS5 database data. Ordinary document ingestion alone does not
+  #     establish exploitability; upstream describes arbitrary SQL or a crafted
+  #     database as prerequisites. See https://www.sqlite.org/cves.html.
   #   cryptography 49.0.0 CVE-2026-69247 — Bleichenbacher oracle. Fix = 50.0.0.
-  # Both need a base-image digest bump and a requirements.lock regeneration, which
-  # is a deliberate dependency change and Aaron's call, not a side effect of a
-  # seed-corpus fix.
+  # Dependency changes remain separately reviewable from the seed-corpus fix.
   vuln-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: test-and-build
+    env:
+      KO_IMAGE: ${{ needs.test-and-build.outputs.image_id }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -116,45 +126,32 @@ jobs:
       - name: Scan the production image for HIGH/CRITICAL vulnerabilities
         run: |
           set -eu
-          docker build --tag knowledge-ops:vuln-audit .
-          docker save --output /tmp/knowledge-ops-audit.tar knowledge-ops:vuln-audit
-          docker run --rm --volume /tmp:/scan:ro \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            image --input /scan/knowledge-ops-audit.tar --scanners vuln \
-            --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          # Scan the exact image tested above, never a second build or mutable tag.
+          test -n "$KO_IMAGE"
+          docker image inspect "$KO_IMAGE" >/dev/null
+          docker save --output /tmp/knowledge-ops-audit.tar "$KO_IMAGE"
+          scripts/scan_image_archive.sh /tmp/knowledge-ops-audit.tar /tmp/knowledge-ops-audit.txt \
+            --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --no-progress
+          cat /tmp/knowledge-ops-audit.txt
 
-  # ── Customer edition image ────────────────────────────────────────────────────
-  # Why this job exists (P-00099 finding 3, 2026-09-15): the customer-facing
-  # instance was running `knowledge-ops:0.7.1-noseed`, a host-local `docker build`
-  # layer that existed on exactly one machine, derived from an image whose 0.7.1 tag
-  # pointed at DIFFERENT content on the two hosts. Nobody could say what source a
-  # customer was running. This job is the answer: one image, built from a clean
-  # checkout of a pushed commit, labelled with the revision, and proven corpus-free
-  # by assertion rather than by a tag that says "noseed".
+  # Customer and vulnerability gates consume the same immutable image ID. The
+  # existing runner shares its host Docker daemon between jobs; fail closed if
+  # that artifact is unavailable. PRs exercise every gate but never publish.
   customer-image:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: test-and-build
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      KO_IMAGE: ${{ needs.test-and-build.outputs.image_id }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Build the customer edition
+      - name: Select the tested customer image
         run: |
           set -eu
-          SHA="$(git rev-parse HEAD)"
-          SHORT="$(git rev-parse --short=12 HEAD)"
-          echo "KO_SHA=$SHA"   >> "$GITHUB_ENV"
-          echo "KO_SHORT=$SHORT" >> "$GITHUB_ENV"
-          echo "KO_IMAGE=knowledge-ops:0.7.2-customer-$SHORT" >> "$GITHUB_ENV"
-          # No --build-arg: the Dockerfile's default (KNOWLEDGE_OPS_SEED_CORPUS=none)
-          # makes the build FAIL if any seed markdown is in the context.
-          docker build \
-            --label org.opencontainers.image.revision="$SHA" \
-            --label org.opencontainers.image.source="https://git.unicorncommander.ai/UnicornCommander/Knowledge-Ops" \
-            --tag "knowledge-ops:0.7.2-customer-$SHORT" \
-            --tag knowledge-ops:customer \
-            .
+          test -n "$KO_IMAGE"
+          docker image inspect "$KO_IMAGE" >/dev/null
+          echo "KO_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Assert the image ships NO seed corpus
         run: |
@@ -211,26 +208,19 @@ jobs:
           docker image inspect "$KO_IMAGE" \
             --format 'built {{.Id}} rev={{index .Config.Labels "org.opencontainers.image.revision"}} seed-corpus={{index .Config.Labels "org.magicunicorn.knowledge-ops.seed-corpus"}}'
 
-  # ── Publish ───────────────────────────────────────────────────────────────────
-  # Separate job so the registry push requires BOTH the corpus assertions and a
-  # clean vulnerability audit. Build+verify can proceed while the CVE backlog is
-  # open; publishing a known-vulnerable customer image cannot. While vuln-audit is
-  # red this job is skipped and the verified image is promoted host-to-host with
-  # scripts/promote_customer_image.sh, which checks the same provenance labels.
-  # NOTE: this relies on the runner sharing the host Docker daemon with the build
-  # job (forgejo-runner docker_host: automount on bigboy), so the tag from
-  # customer-image is visible here. If the runner is ever changed to an isolated
-  # daemon, move this back into customer-image and gate it differently.
+  # Publish only after correctness, corpus and vulnerability gates pass. Manual
+  # runs on review branches can build/verify but cannot publish to the registry.
   publish-customer-image:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [customer-image, vuln-audit]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [test-and-build, customer-image, vuln-audit]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/codex/knowledge-openwiki-hardening'
+    env:
+      KO_IMAGE: ${{ needs.test-and-build.outputs.image_id }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Publish the customer image
-        if: ${{ secrets.REGISTRY_TOKEN != '' }}
         env:
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
@@ -240,12 +230,17 @@ jobs:
           # REGISTRY_USER / REGISTRY_TOKEN are UnicornCommander ORG Actions secrets
           # (service user amanuensis-ci, team ci-publishers, includes_all_repositories),
           # so this repo inherits them.
+          : "${REGISTRY_TOKEN:?Registry token is required for publication}"
+          : "${REGISTRY_USER:?Registry user is required for publication}"
           PREFIX=git.unicorncommander.ai/unicorncommander/knowledge-ops
           SHORT="$(git rev-parse --short=12 HEAD)"
-          LOCAL="knowledge-ops:0.7.2-customer-$SHORT"
+          LOCAL="$KO_IMAGE"
+          test -n "$LOCAL"
           docker image inspect "$LOCAL" >/dev/null
           edition="$(docker image inspect "$LOCAL" --format '{{index .Config.Labels "org.magicunicorn.knowledge-ops.seed-corpus"}}')"
           test "$edition" = "none" || { echo "refusing to publish edition '$edition'" >&2; exit 1; }
+          rev="$(docker image inspect "$LOCAL" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+          test "$rev" = "$(git rev-parse HEAD)" || { echo "refusing revision mismatch" >&2; exit 1; }
           export DOCKER_CONFIG="$(mktemp -d)"
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
           printf '%s' "$REGISTRY_TOKEN" | docker login git.unicorncommander.ai -u "$REGISTRY_USER" --password-stdin
