@@ -205,8 +205,6 @@ def principal_from_authorization(authorization: str | None, *, require_auth: boo
 
 
 def require_tool_principal(authorization: str | None) -> Principal:
-    if not settings.mcp_require_jwt:
-        return system_principal()
     token = bearer_token(authorization)
     try:
         claims = verify_brigade_jwt(token)

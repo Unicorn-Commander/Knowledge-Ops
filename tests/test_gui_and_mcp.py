@@ -21,10 +21,34 @@ MANIFEST = Path(__file__).resolve().parent.parent / ".well-known" / "mcps.json"
 STATIC = Path(__file__).resolve().parent.parent / "knowledge_ops" / "static"
 
 
-def _client(tmp_path, monkeypatch) -> TestClient:
+def _client(tmp_path, monkeypatch, *, setup_auth=True) -> TestClient:
     _seed_tmp_env(tmp_path, monkeypatch)
+    import knowledge_ops.config as config
+    monkeypatch.setattr(config.settings, "mcp_allow_anonymous_discovery", False)
+    token = None
+    if setup_auth:
+        import jwt as pyjwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        import knowledge_ops.brigade_auth as ba
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_jwk = json.loads(pyjwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+        pub_jwk.update({"kid": "client-test-kid", "alg": "RS256", "use": "sig"})
+        monkeypatch.setattr(ba, "_fetch_jwks", lambda: {"client-test-kid": pub_jwk})
+        monkeypatch.setattr(ba, "_jwks_keys", {}, raising=False)
+        monkeypatch.setattr(ba, "_jwks_fetched_at", 0.0, raising=False)
+        monkeypatch.setattr(config.settings, "mcp_trusted_issuers", ["https://brigade.magicunicorn.dev"])
+        now = int(time.time())
+        token = pyjwt.encode(
+            {"iss": "https://brigade.magicunicorn.dev", "aud": "knowledge-ops", "sub": "mcp-test",
+             "iat": now, "exp": now + 300, "scope": "admin:knowledge"},
+            key, algorithm="RS256", headers={"kid": "client-test-kid"},
+        )
     from knowledge_ops.api import app
-    return TestClient(app)
+    client = TestClient(app)
+    if token:
+        client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
 
 
 # ---------------- GUI ----------------
@@ -125,6 +149,23 @@ def test_mcp_initialize(tmp_path, monkeypatch):
         assert "protocolVersion" in res and "tools" in res["capabilities"]
 
 
+@pytest.mark.parametrize("method", ["initialize", "tools/list", "ping"])
+def test_mcp_anonymous_discovery_requires_authentication(tmp_path, monkeypatch, method):
+    with _client(tmp_path, monkeypatch) as c:
+        body = {"jsonrpc": "2.0", "id": 99, "method": method}
+        r = c.post("/mcp", json=body, headers={"Authorization": ""})
+        assert r.status_code == 401
+        assert r.headers["www-authenticate"] == "Bearer"
+        assert r.json()["error"] == {"code": -32001, "message": "unauthorized"}
+
+
+def test_mcp_authenticated_discovery_keeps_result_shape(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as c:
+        r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        assert r.status_code == 200
+        assert r.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
 def test_mcp_tools_list_matches_manifest(tmp_path, monkeypatch):
     manifest_tools = {t["name"] for t in json.loads(MANIFEST.read_text())["tools"]}
     # 12 originals + the graph/links/stats/whoami read-parity tools.
@@ -145,7 +186,7 @@ def test_mcp_tools_call_ground_returns_cited_evidence(tmp_path, monkeypatch):
         r = c.post("/mcp", json={
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "ground", "arguments": {"query": "What is Magic Unicorn?", "scope": "global", "k": 5}},
-        })
+            })
         assert r.status_code == 200
         result = r.json()["result"]
         assert result["isError"] is False
@@ -212,6 +253,7 @@ def test_mcp_tools_call_graph_matches_http_payload(tmp_path, monkeypatch, fresh_
     monkeypatch.setattr(config.settings, "enable_qdrant", False)
     monkeypatch.setattr(config.settings, "enable_falkordb", False)
     with _client(tmp_path, monkeypatch) as c:
+        monkeypatch.setattr(config.settings, "api_require_auth", True)
         r = _call_tool(c, "graph", {"scope": "global", "limit_per_coll": 25})
         assert r.status_code == 200
         result = r.json()["result"]
@@ -270,14 +312,16 @@ def test_mcp_tools_call_stats_counts_sources(tmp_path, monkeypatch, fresh_graph_
 
 
 def test_mcp_tools_call_whoami_matches_kb_me(tmp_path, monkeypatch):
+    import knowledge_ops.config as config
     with _client(tmp_path, monkeypatch) as c:
+        monkeypatch.setattr(config.settings, "api_require_auth", True)
         r = _call_tool(c, "whoami", {}, req_id=130)
         assert r.status_code == 200
         result = r.json()["result"]
         assert result["isError"] is False
         payload = result["structuredContent"]
         assert set(payload) == {"name", "scopes", "is_admin"}
-        assert payload["name"] == "local-system" and payload["is_admin"] is True
+        assert payload["name"] == "mcp-test" and payload["is_admin"] is True
         assert payload["scopes"] == sorted(payload["scopes"])
         assert payload == c.get("/kb.me").json()
 
@@ -310,7 +354,7 @@ def test_mcp_read_parity_tools_enforce_the_same_principal(tmp_path, monkeypatch,
             claims["scope"] = scope
         return pyjwt.encode(claims, key, algorithm="RS256", headers={"kid": "test-kid"})
 
-    with _client(tmp_path, monkeypatch) as c:
+    with _client(tmp_path, monkeypatch, setup_auth=False) as c:
         # whoami works without any scope and reflects the token, not local-system
         r = _call_tool(c, "whoami", {}, req_id=140,
                        headers={"Authorization": f"Bearer {mint(scope='')}"})
@@ -339,13 +383,13 @@ def test_mcp_read_parity_tools_enforce_the_same_principal(tmp_path, monkeypatch,
 
 
 def test_mcp_jwt_gate_blocks_anonymous_tools_call_when_enforced(tmp_path, monkeypatch):
-    """With enforcement on, tools/call needs a Brigade JWT; metadata stays open."""
+    """Every MCP method needs a Brigade JWT unless discovery compatibility is enabled."""
     import knowledge_ops.config as config
 
     with _client(tmp_path, monkeypatch) as c:
         monkeypatch.setattr(config.settings, "mcp_require_jwt", True)
         # tools/call without a token -> 401 (not a server error)
-        r = c.post("/mcp", json={
+        r = c.post("/mcp", headers={"Authorization": ""}, json={
             "jsonrpc": "2.0", "id": 7, "method": "tools/call",
             "params": {
                 "name": "person@example.test?token=secret",
@@ -353,9 +397,12 @@ def test_mcp_jwt_gate_blocks_anonymous_tools_call_when_enforced(tmp_path, monkey
             },
         })
         assert r.status_code == 401 and r.json()["error"]["code"] == -32001
-        # initialize + tools/list remain reachable (only public manifest metadata)
-        assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 8, "method": "tools/list"}).status_code == 200
-        assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "initialize"}).status_code == 200
+        # Discovery is also denied without a credential.
+        denied_list = c.post("/mcp", json={"jsonrpc": "2.0", "id": 8, "method": "tools/list"}, headers={"Authorization": ""})
+        assert denied_list.status_code == 401
+        assert denied_list.headers["www-authenticate"] == "Bearer"
+        denied_init = c.post("/mcp", json={"jsonrpc": "2.0", "id": 9, "method": "initialize"}, headers={"Authorization": ""})
+        assert denied_init.status_code == 401
     from knowledge_ops.storage import connect
 
     with connect() as db:
@@ -363,8 +410,24 @@ def test_mcp_jwt_gate_blocks_anonymous_tools_call_when_enforced(tmp_path, monkey
             "SELECT resource, details_json FROM audit_events WHERE action='auth.mcp.authentication'"
         )]
     persisted = json.dumps(rows)
-    assert rows[-1]["resource"] == "tools/call"
+    assert {row["resource"] for row in rows[-3:]} == {"tools/call", "tools/list", "initialize"}
     assert "person@example.test" not in persisted and "token=secret" not in persisted
+
+
+def test_mcp_anonymous_discovery_escape_hatch_does_not_open_tools_call(tmp_path, monkeypatch):
+    import knowledge_ops.config as config
+
+    with _client(tmp_path, monkeypatch) as c:
+        monkeypatch.setattr(config.settings, "mcp_allow_anonymous_discovery", True)
+        assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"}, headers={"Authorization": ""}).status_code == 200
+        assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers={"Authorization": ""}).status_code == 200
+        assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "ping"}, headers={"Authorization": ""}).status_code == 200
+        denied = c.post("/mcp", json={
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": {"name": "list_sources", "arguments": {}},
+        }, headers={"Authorization": ""})
+        assert denied.status_code == 401
+        assert denied.headers["www-authenticate"] == "Bearer"
 
 
 def test_unhandled_request_log_uses_only_a_finite_error_receipt(caplog):
@@ -416,7 +479,7 @@ def test_mcp_jwt_verifies_signature_audience_and_issuer(tmp_path, monkeypatch):
 
     call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": "list_sources", "arguments": {}}}
-    with _client(tmp_path, monkeypatch) as c:
+    with _client(tmp_path, monkeypatch, setup_auth=False) as c:
         ok = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint()}"})
         assert ok.status_code == 200 and ok.json()["result"]["isError"] is False
         bad_aud = c.post("/mcp", json=call, headers={"Authorization": f"Bearer {mint(aud='other-app')}"})

@@ -223,10 +223,10 @@ async def mcp_jsonrpc(request: Request) -> Response:
         message = await request.json()
     except Exception:
         return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, status_code=400)
-    status, body = await mcp_http.handle(message, authorization=request.headers.get("authorization"))
+    status, body, headers = await mcp_http.handle(message, authorization=request.headers.get("authorization"))
     if body is None:
-        return Response(status_code=status)
-    return JSONResponse(body, status_code=status)
+        return Response(status_code=status, headers=headers)
+    return JSONResponse(body, status_code=status, headers=headers)
 
 
 class SearchRequest(BaseModel):

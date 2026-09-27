@@ -22,6 +22,7 @@ def test_wiki_upsert_and_search(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config.settings, "data_dir", tmp_path)
     monkeypatch.setattr(config.settings, "wiki_dir", tmp_path / "wiki")
+    monkeypatch.setattr(config.settings, "openwiki_staging_dir", tmp_path / "openwiki" / "staging")
     monkeypatch.setattr(config.settings, "db_path", tmp_path / "knowledge.sqlite3")
     monkeypatch.setattr(storage.settings, "data_dir", tmp_path)
     monkeypatch.setattr(storage.settings, "wiki_dir", tmp_path / "wiki")
@@ -41,6 +42,8 @@ def test_metric_chart(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config.settings, "data_dir", tmp_path)
     monkeypatch.setattr(config.settings, "db_path", tmp_path / "metrics.sqlite3")
+    monkeypatch.setattr(config.settings, "wiki_dir", tmp_path / "wiki")
+    monkeypatch.setattr(config.settings, "openwiki_staging_dir", tmp_path / "openwiki" / "staging")
     monkeypatch.setattr(storage.settings, "data_dir", tmp_path)
     monkeypatch.setattr(storage.settings, "db_path", tmp_path / "metrics.sqlite3")
 

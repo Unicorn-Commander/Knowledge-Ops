@@ -134,6 +134,9 @@ class Settings(BaseModel):
         "KNOWLEDGE_OPS_MCP_JWKS_MAX_STALE_SECONDS", "300"
     ))
     mcp_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWT_LEEWAY", "60"))
+    # Emergency compatibility switch for MCP clients that cannot send a bearer
+    # token during discovery. Disabled by default; tools/call never uses it.
+    mcp_allow_anonymous_discovery: bool = os.getenv("KO_MCP_ALLOW_ANONYMOUS_DISCOVERY", "false").lower() == "true"
 
     def ensure_dirs(self) -> None:
         for directory in (self.data_dir, self.wiki_dir, self.openwiki_staging_dir):
