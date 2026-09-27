@@ -270,7 +270,8 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
         try:
             principal = require_tool_principal(authorization)
         except AuthorizationError:
-            record_audit("anonymous", "auth.mcp.authentication", str(method or "unknown"), "denied")
+            known = ("initialize", "ping", "notifications/initialized", "notifications/cancelled", "tools/list", "tools/call")
+            record_audit("anonymous", "auth.mcp.authentication", method if method in known else "other", "denied")
             return 401, _rpc_error(req_id, -32001, "unauthorized"), {"WWW-Authenticate": "Bearer"}
 
     if method == "initialize":
