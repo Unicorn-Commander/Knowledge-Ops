@@ -408,17 +408,17 @@ def test_historical_federation_rejects_current_only_sources(tmp_path, monkeypatc
 
 def test_mcp_exposes_temporal_citation_and_deletion_contracts(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
-    import knowledge_ops.config as config
     from knowledge_ops.mcp_http import handle
 
-    monkeypatch.setattr(config.settings, "mcp_require_jwt", False)
+    import knowledge_ops.mcp_http as mcp_http
+    monkeypatch.setattr(mcp_http, "require_tool_principal", lambda authorization: system_principal())
 
     async def call(name: str, arguments: dict) -> dict:
-        status, body = await handle({
+        status, body, headers = await handle({
             "jsonrpc": "2.0", "id": name, "method": "tools/call",
             "params": {"name": name, "arguments": arguments},
         })
-        assert status == 200 and body["result"]["isError"] is False
+        assert status == 200 and not headers and body["result"]["isError"] is False
         return body["result"]["structuredContent"]
 
     created = asyncio.run(call("upsert_doc", {

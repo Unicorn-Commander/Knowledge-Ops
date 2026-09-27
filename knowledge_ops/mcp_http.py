@@ -8,9 +8,10 @@ so the Brigade broker's *brokered execution* path works, not just registration.
 the tool catalog is single-sourced from ``.well-known/mcps.json`` (its per-tool
 ``rest`` mapping + ``input_schema``), so REST, the manifest, and MCP never drift.
 
-When ``KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1`` every ``tools/call`` must carry a valid
-Brigade JWT (see ``brigade_auth``); ``initialize``/``tools/list``/``ping`` stay
-open because they only expose the already-public manifest metadata.
+Every MCP method is authenticated with a Brigade JWT (see ``brigade_auth``).
+``KO_MCP_ALLOW_ANONYMOUS_DISCOVERY=true`` may temporarily open discovery-only
+methods for clients that cannot send a bearer token; ``tools/call`` is never
+opened by that switch.
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from .file_index import deep_read, find_file
 from .metrics import record_metric
 from .operations import sanitize_error
 from .storage import record_audit
+from .config import settings
 from .wiki import get_doc, history, list_docs, tombstone_doc, upsert_doc
 
 logger = logging.getLogger("knowledge_ops.mcp")
@@ -252,40 +254,44 @@ def _required_scopes(name: str) -> list[str]:
     return []
 
 
-async def handle(message: dict, authorization: str | None = None) -> tuple[int, dict | None]:
-    """Process one JSON-RPC message. Returns (http_status, response | None).
+async def handle(message: dict, authorization: str | None = None) -> tuple[int, dict | None, dict[str, str]]:
+    """Process one JSON-RPC message. Returns (HTTP status, body, headers).
 
     A None response body means "no content" (202) — used for notifications.
     """
     if not isinstance(message, dict):
-        return 400, _rpc_error(None, -32700, "parse error")
+        return 400, _rpc_error(None, -32700, "parse error"), {}
     req_id = message.get("id")
     method = message.get("method")
     params = message.get("params") or {}
+
+    discovery_method = method in ("initialize", "ping", "notifications/initialized", "notifications/cancelled", "tools/list")
+    if not (settings.mcp_allow_anonymous_discovery and discovery_method):
+        try:
+            principal = require_tool_principal(authorization)
+        except AuthorizationError:
+            known = ("initialize", "ping", "notifications/initialized", "notifications/cancelled", "tools/list", "tools/call")
+            record_audit("anonymous", "auth.mcp.authentication", method if method in known else "other", "denied")
+            return 401, _rpc_error(req_id, -32001, "unauthorized"), {"WWW-Authenticate": "Bearer"}
 
     if method == "initialize":
         return 200, _rpc_result(req_id, {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "knowledge-ops", "version": __version__},
-        })
+        }), {}
     if method in ("notifications/initialized", "notifications/cancelled"):
-        return 202, None
+        return 202, None, {}
     if method == "ping":
-        return 200, _rpc_result(req_id, {})
+        return 200, _rpc_result(req_id, {}), {}
     if method == "tools/list":
-        return 200, _rpc_result(req_id, {"tools": list_tools()})
+        return 200, _rpc_result(req_id, {"tools": list_tools()}), {}
     if method == "tools/call":
         if not isinstance(params, dict):
-            return 400, _rpc_error(req_id, -32602, "invalid params")
+            return 400, _rpc_error(req_id, -32602, "invalid params"), {}
         raw_name = params.get("name", "")
         name = raw_name if isinstance(raw_name, str) else ""
         audit_name = _audit_tool_name(raw_name)
-        try:
-            principal = require_tool_principal(authorization)
-        except AuthorizationError:
-            record_audit("anonymous", "auth.mcp.authentication", "tools/call", "denied")
-            return 401, _rpc_error(req_id, -32001, "unauthorized")
         try:
             principal.require(*_required_scopes(name))
         except AuthorizationError:
@@ -293,13 +299,13 @@ async def handle(message: dict, authorization: str | None = None) -> tuple[int, 
                 principal.subject, "mcp.tool", audit_name, "denied",
                 {"reason_code": "permission_denied"},
             )
-            return 403, _rpc_error(req_id, -32003, "forbidden")
+            return 403, _rpc_error(req_id, -32003, "forbidden"), {}
         arguments = params.get("arguments") or {}
         result = await _call_tool(name, arguments, principal)
         record_audit(
             principal.subject, "mcp.tool", audit_name,
             "success" if not result.get("isError") else "error",
         )
-        return 200, _rpc_result(req_id, result)
+        return 200, _rpc_result(req_id, result), {}
 
-    return 200, _rpc_error(req_id, -32601, f"method not found: {method}")
+    return 200, _rpc_error(req_id, -32601, f"method not found: {method}"), {}

@@ -116,10 +116,8 @@ class Settings(BaseModel):
     enable_center_deep: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_CENTER_DEEP", "0") == "1"
     enable_falkordb: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_FALKORDB", "0") == "1"
 
-    # HTTP-MCP /mcp Brigade-JWT gate. Off by default (local/tests/standalone need
-    # no token); set =1 on the public deploy where oauth2-proxy whitelists /mcp so
-    # the broker reaches us — then the Brigade JWT is enforced here. Defaults match
-    # .well-known/mcps.json auth.federated_auth.
+    # Legacy compatibility setting retained for callers of brigade_auth's older
+    # helper. The HTTP-MCP /mcp route always validates a Brigade JWT now.
     mcp_require_jwt: bool = os.getenv("KNOWLEDGE_OPS_MCP_REQUIRE_JWT", "0") == "1"
     mcp_jwks_url: str = os.getenv("KNOWLEDGE_OPS_MCP_JWKS_URL", "https://brigade.magicunicorn.dev/.well-known/jwks.json")
     mcp_expected_audience: str = os.getenv("KNOWLEDGE_OPS_MCP_AUDIENCE", "knowledge-ops")
@@ -134,6 +132,9 @@ class Settings(BaseModel):
         "KNOWLEDGE_OPS_MCP_JWKS_MAX_STALE_SECONDS", "300"
     ))
     mcp_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_MCP_JWT_LEEWAY", "60"))
+    # Emergency compatibility switch for MCP clients that cannot send a bearer
+    # token during discovery. Disabled by default; tools/call never uses it.
+    mcp_allow_anonymous_discovery: bool = os.getenv("KO_MCP_ALLOW_ANONYMOUS_DISCOVERY", "false").lower() == "true"
 
     def ensure_dirs(self) -> None:
         for directory in (self.data_dir, self.wiki_dir, self.openwiki_staging_dir):
