@@ -13,6 +13,7 @@ from .memory_quality import run_due_refresh_jobs
 from .metrics import record_metric, render_metric_chart
 from .maintenance import create_backup, reindex_wiki, restore_and_verify
 from .operations import operations_snapshot, worker_readiness
+from .retag_legacy import retag_legacy
 from .storage import init_db
 from .worker import run_worker
 from .wiki import get_doc, history, ingest_marketing_docs, list_docs, upsert_doc
@@ -87,6 +88,12 @@ def main() -> None:
     p.add_argument("archive")
     p.add_argument("--target", required=True)
     sub.add_parser("reindex-wiki")
+    p = sub.add_parser("retag-legacy")
+    p.add_argument("--workspace", required=True)
+    p.add_argument("--legal-project")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true")
+    mode.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     if args.cmd == "init":
@@ -152,6 +159,15 @@ def main() -> None:
             raise SystemExit(1)
     elif args.cmd == "reindex-wiki":
         print_json(reindex_wiki())
+    elif args.cmd == "retag-legacy":
+        try:
+            print_json(retag_legacy(
+                args.workspace,
+                args.legal_project,
+                apply=args.apply,
+            ))
+        except (ValueError, RuntimeError) as exc:
+            raise SystemExit(f"retag-legacy: {exc}") from exc
 
 
 if __name__ == "__main__":
