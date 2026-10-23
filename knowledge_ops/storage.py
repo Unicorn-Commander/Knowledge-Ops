@@ -13,7 +13,7 @@ from .config import settings
 from .models import utcnow
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -240,6 +240,25 @@ def _migrate_v3(db: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_v4(db: sqlite3.Connection) -> None:
+    """Persist receiver-side workspace/project visibility bindings."""
+    tables = {
+        str(row[0]) for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "wiki_docs" not in tables:
+        return
+    _add_column(db, "wiki_docs", "visibility_workspace_id TEXT")
+    _add_column(db, "wiki_docs", "visibility_project_id TEXT")
+    db.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wiki_docs_visibility
+          ON wiki_docs(visibility_workspace_id, visibility_project_id, scope);
+        """
+    )
+
+
 def connect() -> sqlite3.Connection:
     settings.ensure_dirs()
     database_path = settings.db_path.expanduser()
@@ -377,6 +396,12 @@ def init_db() -> None:
                 db.execute(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                     (3, now()),
+                )
+            if 4 not in applied:
+                _migrate_v4(db)
+                db.execute(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                    (4, now()),
                 )
 
 

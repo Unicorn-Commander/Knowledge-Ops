@@ -48,7 +48,7 @@ def test_legacy_database_upgrades_in_place(tmp_path, monkeypatch):
         version = db.execute("SELECT max(version) FROM schema_migrations").fetchone()[0]
     assert {"valid_from", "valid_until", "supersedes_id", "lifecycle_state", "tombstoned_at"} <= columns
     assert row["valid_from"] == "2025-01-01T00:00:00+00:00" and row["body"] == "body"
-    assert row["lifecycle_state"] == "active" and version == 3
+    assert row["lifecycle_state"] == "active" and version == 4
 
 
 def test_supersession_supports_current_and_as_of_retrieval(tmp_path, monkeypatch):

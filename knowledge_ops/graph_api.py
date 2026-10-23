@@ -9,9 +9,8 @@ never silently vanish. Every per-store step degrades to "skip" — an unreachabl
 backend thins the graph, it never 500s.
 
 The full graph response is cached in-process for 10 minutes per visibility
-identity (scope, admin flag, scope-set, identity-set — identities are part of
-the key so two users who share scopes but own different personal records never
-share a cached graph).
+identity (scope, admin flag, scope-set, identity-set, workspace-set, and
+project-set).
 """
 from __future__ import annotations
 
@@ -79,6 +78,9 @@ def _cache_key(principal: Principal, scope: str | None) -> tuple:
         principal.is_admin,
         frozenset(principal.scopes),
         frozenset(principal.identities),
+        frozenset(principal.workspaces),
+        frozenset(principal.projects),
+        settings.allow_legacy_global_visibility,
     )
 
 
@@ -241,7 +243,9 @@ def _visible_wiki_docs(principal: Principal, scope: str | None) -> list[dict]:
     init_db()
     with connect() as db:
         rows = db.execute(
-            """SELECT path, title, body, scope, owner FROM wiki_docs
+            """SELECT path, title, body, scope, owner,
+                      visibility_workspace_id, visibility_project_id
+               FROM wiki_docs
                WHERE lifecycle_state='active' ORDER BY path"""
         ).fetchall()
     return [doc for doc in (dict(row) for row in rows) if can_read_record(principal, doc, scope)]
@@ -546,7 +550,10 @@ async def kb_stats(principal: GraphPrincipal) -> dict:
                 )
 
     try:
-        sources.append({"key": "wiki", "label": "Wiki", "count": len(list_docs()), "kind": "canonical"})
+        sources.append({
+            "key": "wiki", "label": "Wiki", "count": len(list_docs(principal=principal)),
+            "kind": "canonical",
+        })
     except Exception:
         pass
 

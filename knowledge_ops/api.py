@@ -4,7 +4,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -246,6 +246,8 @@ class DocRequest(BaseModel):
     valid_until: str | None = Field(default=None, max_length=80)
     supersedes_id: str | None = Field(default=None, max_length=120)
     review_due_at: str | None = Field(default=None, max_length=80)
+    metadata: dict[str, Any] | None = None
+    visibility: dict[str, str] | None = None
 
 
 class DeleteRequest(BaseModel):
@@ -370,7 +372,7 @@ def kb_list_sources(principal: ApiPrincipal) -> dict:
 @app.get("/kb.docs")
 def kb_docs(principal: ApiPrincipal) -> dict:
     principal.require("read:knowledge")
-    return {"docs": [doc for doc in list_docs() if can_read_record(principal, doc)]}
+    return {"docs": list_docs(principal=principal)}
 
 
 @app.get("/kb.get_doc")
@@ -388,7 +390,7 @@ def kb_upsert_doc(req: DocRequest, principal: ApiPrincipal) -> dict:
     doc_id = upsert_doc(
         req.path, req.md, scope, owner, valid_from=req.valid_from,
         valid_until=req.valid_until, supersedes_id=req.supersedes_id,
-        review_due_at=req.review_due_at,
+        review_due_at=req.review_due_at, metadata=req.metadata, visibility=req.visibility,
     )
     record_audit(principal.subject, "wiki.upsert", doc_id, "success", {"scope": scope, "path": req.path})
     graph_api.invalidate_link_caches()

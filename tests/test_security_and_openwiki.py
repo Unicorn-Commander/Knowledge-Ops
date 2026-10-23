@@ -36,7 +36,10 @@ def _passage(scope: str, owner: str, source_id: str) -> Passage:
     return Passage("test", source_id, source_id, "evidence", 1.0, scope=scope, owner=owner)
 
 
-def test_identity_policy_defaults_to_global_and_own_personal_only():
+def test_identity_policy_can_preserve_legacy_global_visibility(monkeypatch):
+    import knowledge_ops.config as config
+
+    monkeypatch.setattr(config.settings, "allow_legacy_global_visibility", True)
     alice = Principal(
         "alice-id",
         scopes=frozenset({"read:knowledge"}),
@@ -58,8 +61,10 @@ def test_identity_policy_defaults_to_global_and_own_personal_only():
 
 def test_native_wiki_query_never_selects_another_personal_owner(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
+    import knowledge_ops.config as config
     from knowledge_ops.wiki import search_wiki, upsert_doc
 
+    monkeypatch.setattr(config.settings, "allow_legacy_global_visibility", True)
     upsert_doc("shared.md", "# Shared\n\ncommon needle", "global", "org")
     upsert_doc("alice.md", "# Alice\n\ncommon needle", "personal", "alice@example.com")
     upsert_doc("bob.md", "# Bob\n\ncommon needle", "personal", "bob@example.com")
@@ -72,9 +77,11 @@ def test_native_wiki_query_never_selects_another_personal_owner(tmp_path, monkey
     assert {hit.title for hit in hits} == {"Shared", "Alice"}
 
 
-def test_qdrant_filter_is_identity_derived_and_missing_scope_is_not_visible():
+def test_qdrant_filter_is_identity_derived_and_missing_scope_is_not_visible(monkeypatch):
     from knowledge_ops.adapters.qdrant import _visibility_filter
+    import knowledge_ops.config as config
 
+    monkeypatch.setattr(config.settings, "allow_legacy_global_visibility", True)
     alice = Principal(
         "alice-id",
         scopes=frozenset({"read:knowledge"}),

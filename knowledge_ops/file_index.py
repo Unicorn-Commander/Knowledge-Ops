@@ -104,7 +104,9 @@ def index_root(root: Path, scope: str = "personal", owner: str = "", limit: int 
 
 def find_file(query: str, k: int = 8, scope: str | None = None, *, principal: Principal) -> list[Passage]:
     init_db()
-    where, params = sqlite_visibility_clause(principal, scope)
+    where, params = sqlite_visibility_clause(
+        principal, scope, workspace_column="NULL", project_column="NULL",
+    )
     with connect() as db:
         rows = db.execute(f"SELECT * FROM file_chunks WHERE {where}", params).fetchall()
     best_by_path: dict[str, Passage] = {}
@@ -137,7 +139,9 @@ def find_file(query: str, k: int = 8, scope: str | None = None, *, principal: Pr
 
 def deep_read(path: str, query: str = "", k: int = 8, *, principal: Principal) -> list[Passage]:
     init_db()
-    where, params = sqlite_visibility_clause(principal, None)
+    where, params = sqlite_visibility_clause(
+        principal, None, workspace_column="NULL", project_column="NULL",
+    )
     with connect() as db:
         rows = db.execute(
             f"SELECT * FROM file_chunks WHERE path=? AND ({where}) ORDER BY chunk_index",

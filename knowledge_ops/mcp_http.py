@@ -102,7 +102,8 @@ def _t_upsert_doc(a: dict, principal: Principal) -> dict:
     doc_id = upsert_doc(
         a["path"], a["md"], scope, owner, valid_from=a.get("valid_from"),
         valid_until=a.get("valid_until"), supersedes_id=a.get("supersedes_id"),
-        review_due_at=a.get("review_due_at"),
+        review_due_at=a.get("review_due_at"), metadata=a.get("metadata"),
+        visibility=a.get("visibility"),
     )
     record_audit(principal.subject, "mcp.wiki.upsert", doc_id, "success", {"scope": scope})
     # Mirror api.py kb.upsert_doc: drop the cached link + constellation graphs so

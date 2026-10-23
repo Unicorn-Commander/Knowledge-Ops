@@ -284,8 +284,10 @@ def test_kb_links_endpoint_shape(tmp_path, monkeypatch):
 
 def test_kb_links_respects_visibility(tmp_path, monkeypatch):
     from tests.test_federation import _seed_tmp_env
+    import knowledge_ops.config as config
 
     _seed_tmp_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(config.settings, "allow_legacy_global_visibility", True)
     from knowledge_ops.wiki import upsert_doc
 
     upsert_doc("shared.md", "# Shared\n\nPublic.")

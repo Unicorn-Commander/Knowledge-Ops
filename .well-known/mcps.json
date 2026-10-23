@@ -141,7 +141,9 @@
           "valid_from": {"type": "string", "description": "Optional ISO 8601 validity start."},
           "valid_until": {"type": "string", "description": "Optional ISO 8601 validity end."},
           "supersedes_id": {"type": "string", "description": "Optional predecessor document id."},
-          "review_due_at": {"type": "string", "description": "Optional ISO 8601 review date."}
+          "review_due_at": {"type": "string", "description": "Optional ISO 8601 review date."},
+          "metadata": {"type": "object", "description": "Source metadata; project documents must include workspace_id and may include project_id."},
+          "visibility": {"type": "object", "properties": {"workspace_id": {"type": "string"}, "project_id": {"type": "string"}}, "additionalProperties": false, "description": "Explicit receiver-side workspace/project binding."}
         },
         "required": ["path", "md"]
       }

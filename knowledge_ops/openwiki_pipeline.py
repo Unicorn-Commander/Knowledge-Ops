@@ -246,6 +246,11 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(source_bytes)
             target.chmod(0o440)
+            visibility_metadata = {
+                key: metadata[key]
+                for key in ("workspace_id", "project_id", "visibility")
+                if key in metadata
+            }
             documents.append({
                 "path": rel,
                 "sha256": content_digest,
@@ -256,6 +261,7 @@ def stage_bundle(source_path: str, producer_version: str, principal: Principal) 
                 "producer": "openwiki",
                 "producer_version": producer_version,
                 "source_uri": metadata.get("source_uri") or f"openwiki://{import_id}/{rel}",
+                "metadata": visibility_metadata,
             })
         manifest = {
             "schema": "knowledge-ops/openwiki-staging-v1",
@@ -508,6 +514,7 @@ def approve_import(import_id: str, principal: Principal, note: str, *, accept_pi
             "md": body,
             "scope": target_scope,
             "owner": target_owner,
+            "metadata": doc.get("metadata") or {},
             "provenance": {
                 "source_type": "openwiki",
                 "source_uri": doc["source_uri"],
@@ -516,7 +523,11 @@ def approve_import(import_id: str, principal: Principal, note: str, *, accept_pi
                 "import_id": import_id,
                 "reviewed_by": principal.subject,
                 "reviewed_at": reviewed_at,
-                "metadata": {"producer_version": manifest["producer_version"], "source_digest": manifest["source_digest"]},
+                "metadata": {
+                    "producer_version": manifest["producer_version"],
+                    "source_digest": manifest["source_digest"],
+                    **(doc.get("metadata") or {}),
+                },
             },
         })
 
