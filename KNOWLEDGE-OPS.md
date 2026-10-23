@@ -231,12 +231,35 @@ missing authorization contract keeps the adapter disabled.
 ## Authorization and visibility
 
 REST and HTTP-MCP share one verified-principal policy. Omitting scope returns
-global knowledge plus personal records owned by token `sub`/verified identity aliases.
+authorized global knowledge plus personal records owned by token `sub`/verified identity aliases.
 `scope=personal` cannot retrieve another owner. `scope=all`, restricted sources,
 global writes, file indexing, and OpenWiki promotion require administrator or
 specific elevated scopes. Missing source classification is `restricted`.
 For OIDC, `sub` is authoritative; email is an alias only when the signed token
 sets boolean `email_verified: true`, and `preferred_username` is not an owner.
+
+### Workspace and project-bound documents
+
+The client must send source tenancy metadata when creating a project document;
+`scope: "global"` is not a substitute for a workspace binding. The REST and
+HTTP-MCP upsert payloads accept either of these equivalent forms:
+
+```json
+{"metadata": {"workspace_id": "workspace-a", "project_id": "project-17"}}
+```
+
+```json
+{"visibility": {"workspace_id": "workspace-a", "project_id": "project-17"}}
+```
+
+`project_id` is optional, but it requires `workspace_id` when present. The
+verified token must carry the same workspace (`workspace_id` or `workspaces`)
+and, for project-bound documents, the same project (`project_id` or `projects`).
+Knowledge-Ops enforces this binding in document get/list/search predicates, so
+the client must not rely on filtering results after retrieval. Unbound global
+rows are treated as legacy compatibility rows only when
+`KNOWLEDGE_OPS_ALLOW_LEGACY_GLOBAL_VISIBILITY=1`; the default is the safe deny
+behavior for non-admin readers.
 
 OpenWiki 0.2.0 is pinned as an untrusted producer. Its immutable staging,
 OKF/security gates, and review-before-canonical contract are in

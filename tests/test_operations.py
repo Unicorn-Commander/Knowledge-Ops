@@ -129,7 +129,7 @@ def test_v1_refresh_queue_migrates_and_backfills_pending_dispatch_contract(
         outbox_exists = db.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='deletion_outbox'"
         ).fetchone()[0]
-    assert version == 3 and outbox_exists == 1
+    assert version == 4 and outbox_exists == 1
     assert row["next_attempt_at"] == row["scheduled_for"]
     assert row["lease_token"] is None and row["max_attempts"] == 5
     assert row["kind_snapshot"] == "connector_refresh"
@@ -163,7 +163,7 @@ def test_concurrent_process_initialization_serializes_migrations(tmp_path):
             "SELECT version FROM schema_migrations ORDER BY version"
         )]
         columns = {row[1] for row in db.execute("PRAGMA table_info(refresh_runs)")}
-    assert versions == [1, 2, 3]
+    assert versions == [1, 2, 3, 4]
     assert {
         "lease_token", "next_attempt_at", "attempt_count",
         "kind_snapshot", "source_ref_snapshot",
@@ -823,7 +823,7 @@ def test_backup_restore_reindex_is_restrictive_and_external_backlog_is_recoverab
 
     archive = tmp_path / "archives" / "knowledge-ops.tar.gz"
     result = create_backup(archive)
-    assert result["schema_version"] == 3
+    assert result["schema_version"] == 4
     assert stat.S_IMODE(archive.stat().st_mode) == 0o600
     with pytest.raises(ValueError, match="outside"):
         create_backup(config.settings.wiki_dir / "recursive.tar.gz")
@@ -977,7 +977,7 @@ def test_readiness_rejects_schema_version_drift(tmp_path, monkeypatch):
 
     with TestClient(app) as client:
         with connect() as db:
-            db.execute("DELETE FROM schema_migrations WHERE version=3")
+            db.execute("DELETE FROM schema_migrations WHERE version=4")
         response = client.get("/ready")
         assert response.status_code == 503
         assert response.json()["checks"]["database"] is True

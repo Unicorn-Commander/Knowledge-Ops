@@ -9,7 +9,15 @@ import tempfile
 from typing import Callable
 
 from .config import settings
-from .authorization import AuthorizationError, Principal, can_read_record, sqlite_visibility_clause
+from .authorization import (
+    AuthorizationError,
+    Principal,
+    can_read_record,
+    filter_passages,
+    normalize_visibility,
+    record_visibility,
+    sqlite_visibility_clause,
+)
 from .models import Passage
 from .operations import sanitize_error
 from .storage import connect, init_db, json_dumps, now, record_audit
@@ -82,6 +90,8 @@ def _validated_doc(
     valid_until: str | None = None,
     supersedes_id: str | None = None,
     review_due_at: str | None = None,
+    metadata: dict | None = None,
+    visibility: dict | None = None,
 ) -> dict:
     rel, disk_path = safe_wiki_path(path)
     if scope not in {"global", "personal"}:
@@ -94,6 +104,7 @@ def _validated_doc(
     normalized_review = normalize_timestamp(review_due_at) if review_due_at else None
     if normalized_until and normalized_until <= normalized_from:
         raise ValueError("valid_until must be later than valid_from")
+    binding = normalize_visibility(visibility, metadata=metadata)
     return {
         "path": rel,
         "disk_path": disk_path,
@@ -106,6 +117,8 @@ def _validated_doc(
         "valid_until": normalized_until,
         "supersedes_id": supersedes_id.strip() if supersedes_id else None,
         "review_due_at": normalized_review,
+        "visibility_workspace_id": binding["workspace_id"] if binding else None,
+        "visibility_project_id": binding.get("project_id") if binding else None,
     }
 
 
@@ -119,6 +132,8 @@ def _upsert_db(db, doc: dict, timestamp: str, provenance: dict | None = None) ->
     valid_until = doc["valid_until"]
     supersedes_id = doc["supersedes_id"]
     review_due_at = doc["review_due_at"]
+    visibility_workspace_id = doc["visibility_workspace_id"]
+    visibility_project_id = doc["visibility_project_id"]
     if existing:
         if not doc.get("valid_until_explicit"):
             valid_until = existing["valid_until"]
@@ -126,6 +141,9 @@ def _upsert_db(db, doc: dict, timestamp: str, provenance: dict | None = None) ->
             supersedes_id = existing["supersedes_id"]
         if not doc.get("review_due_explicit"):
             review_due_at = existing["review_due_at"]
+        if not doc.get("visibility_explicit"):
+            visibility_workspace_id = existing["visibility_workspace_id"]
+            visibility_project_id = existing["visibility_project_id"]
     if valid_until and valid_until <= valid_from:
         raise ValueError("valid_until must be later than valid_from")
     db.execute(
@@ -133,18 +151,21 @@ def _upsert_db(db, doc: dict, timestamp: str, provenance: dict | None = None) ->
         INSERT INTO wiki_docs(
           id, path, title, body, scope, owner, created_at, updated_at,
           valid_from, valid_until, supersedes_id, lifecycle_state,
-          tombstoned_at, tombstone_reason, review_due_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, NULL, ?)
+          tombstoned_at, tombstone_reason, review_due_at,
+          visibility_workspace_id, visibility_project_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, NULL, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET title=excluded.title, body=excluded.body,
           scope=excluded.scope, owner=excluded.owner, updated_at=excluded.updated_at,
           valid_from=excluded.valid_from, valid_until=excluded.valid_until,
           supersedes_id=excluded.supersedes_id, lifecycle_state=excluded.lifecycle_state,
-          tombstoned_at=NULL, tombstone_reason=NULL, review_due_at=excluded.review_due_at
+          tombstoned_at=NULL, tombstone_reason=NULL, review_due_at=excluded.review_due_at,
+          visibility_workspace_id=excluded.visibility_workspace_id,
+          visibility_project_id=excluded.visibility_project_id
         """,
         (
             doc["id"], doc["path"], doc["title"], doc["md"], doc["scope"],
             doc["owner"], timestamp, timestamp, valid_from, valid_until,
-            supersedes_id, review_due_at,
+            supersedes_id, review_due_at, visibility_workspace_id, visibility_project_id,
         ),
     )
     db.execute("DELETE FROM wiki_fts WHERE doc_id=?", (doc["id"],))
@@ -173,6 +194,22 @@ def _set_provenance_db(db, doc_id: str, provenance: dict) -> None:
             provenance["reviewed_at"], json.dumps(provenance.get("metadata") or {}, sort_keys=True),
         ),
     )
+    binding = normalize_visibility(metadata=provenance.get("metadata"))
+    if binding:
+        existing = db.execute(
+            "SELECT visibility_workspace_id, visibility_project_id FROM wiki_docs WHERE id=?",
+            (doc_id,),
+        ).fetchone()
+        if existing and (
+            existing["visibility_workspace_id"] not in (None, binding["workspace_id"])
+            or existing["visibility_project_id"] not in (None, binding.get("project_id"))
+        ):
+            raise AuthorizationError("existing document visibility binding is immutable")
+        db.execute(
+            """UPDATE wiki_docs SET visibility_workspace_id=?, visibility_project_id=?
+               WHERE id=?""",
+            (binding["workspace_id"], binding.get("project_id"), doc_id),
+        )
 
 
 def upsert_documents_atomic(
@@ -190,11 +227,24 @@ def upsert_documents_atomic(
                 item["path"], item["md"], item["scope"], item["owner"],
                 valid_from=item.get("valid_from"), valid_until=item.get("valid_until"),
                 supersedes_id=item.get("supersedes_id"), review_due_at=item.get("review_due_at"),
+                metadata={
+                    **(
+                        item.get("provenance", {}).get("metadata", {})
+                        if isinstance(item.get("provenance"), dict)
+                        and isinstance(item.get("provenance", {}).get("metadata"), dict)
+                        else {}
+                    ),
+                    **(item.get("metadata") if isinstance(item.get("metadata"), dict) else {}),
+                },
+                visibility=item.get("visibility"),
             )
             doc["valid_from_explicit"] = bool(item.get("valid_from"))
             doc["valid_until_explicit"] = bool(item.get("valid_until"))
             doc["supersedes_explicit"] = bool(item.get("supersedes_id"))
             doc["review_due_explicit"] = bool(item.get("review_due_at"))
+            doc["visibility_explicit"] = bool(
+                doc["visibility_workspace_id"] or doc["visibility_project_id"]
+            )
             if doc["path"] in seen:
                 raise ValueError(f"duplicate canonical document path: {doc['path']}")
             seen.add(doc["path"])
@@ -217,6 +267,11 @@ def upsert_documents_atomic(
                     or existing_target["owner"].lower() != doc["owner"].lower()
                 ):
                     raise AuthorizationError("existing document scope and owner are immutable")
+                if existing_target and doc["visibility_explicit"] and (
+                    existing_target["visibility_workspace_id"] != doc["visibility_workspace_id"]
+                    or existing_target["visibility_project_id"] != doc["visibility_project_id"]
+                ):
+                    raise AuthorizationError("existing document visibility binding is immutable")
                 if (
                     existing_target
                     and doc["valid_from_explicit"]
@@ -312,11 +367,14 @@ def upsert_doc(
     valid_until: str | None = None,
     supersedes_id: str | None = None,
     review_due_at: str | None = None,
+    metadata: dict | None = None,
+    visibility: dict | None = None,
 ) -> str:
     return upsert_documents_atomic([{
         "path": path, "md": md, "scope": scope, "owner": owner,
         "valid_from": valid_from, "valid_until": valid_until,
         "supersedes_id": supersedes_id, "review_due_at": review_due_at,
+        "metadata": metadata, "visibility": visibility,
     }])[0]
 
 
@@ -412,7 +470,7 @@ def set_provenance(
         })
 
 
-def get_doc(doc_id_or_path: str) -> dict | None:
+def get_doc(doc_id_or_path: str, *, principal: Principal | None = None) -> dict | None:
     init_db()
     with connect() as db:
         row = db.execute(
@@ -421,23 +479,39 @@ def get_doc(doc_id_or_path: str) -> dict | None:
         if not row:
             return None
         doc = dict(row)
+        if principal is not None and not can_read_record(principal, doc):
+            return None
         provenance = db.execute("SELECT * FROM wiki_provenance WHERE doc_id=?", (doc["id"],)).fetchone()
         if provenance:
             doc["provenance"] = dict(provenance)
             doc["provenance"]["metadata"] = json.loads(doc["provenance"].pop("metadata_json", "{}"))
+        binding = record_visibility(doc)
+        if binding:
+            doc["visibility"] = binding
         return doc
 
 
-def list_docs() -> list[dict]:
+def list_docs(*, principal: Principal | None = None) -> list[dict]:
     init_db()
     with connect() as db:
-        return [dict(r) for r in db.execute(
+        rows = [dict(r) for r in db.execute(
             """SELECT d.id, d.path, d.title, d.scope, d.owner, d.updated_at,
                       d.valid_from, d.valid_until, d.supersedes_id, d.lifecycle_state,
                       d.tombstoned_at, d.review_due_at,
+                      d.visibility_workspace_id, d.visibility_project_id,
                       p.source_type AS provenance_source
                FROM wiki_docs d LEFT JOIN wiki_provenance p ON p.doc_id=d.id ORDER BY d.path"""
         )]
+    docs: list[dict] = []
+    for doc in rows:
+        binding = record_visibility(doc)
+        if binding:
+            doc["visibility"] = binding
+        doc.pop("visibility_workspace_id", None)
+        doc.pop("visibility_project_id", None)
+        if principal is None or can_read_record(principal, doc):
+            docs.append(doc)
+    return docs
 
 
 def history(doc_id_or_path: str) -> list[dict]:
@@ -496,9 +570,10 @@ def search_wiki(
                         },
                         "valid_from": r["valid_from"], "valid_until": r["valid_until"],
                         "lifecycle_state": r["lifecycle_state"], "provenance": provenance.get(r["id"]),
+                        "visibility": record_visibility(dict(r)),
                     },
                 ))
-    return sorted(hits, key=lambda h: h.score, reverse=True)[:k]
+    return filter_passages(principal, sorted(hits, key=lambda h: h.score, reverse=True)[:k], scope)
 
 
 def _deletion_result(row: dict, projections: dict) -> dict:

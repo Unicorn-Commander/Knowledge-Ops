@@ -112,6 +112,13 @@ class Settings(BaseModel):
     # P-00099 finding 3, 2026-09-15 — measured live on the customer deployment.
     seed_internal_corpus: bool = os.getenv("KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS", "0") == "1"
 
+    # Global rows without a workspace binding predate receiver-side project
+    # visibility. Keep that legacy behavior opt-in; newly ingested unbound
+    # global rows are therefore safe by default for non-admin principals.
+    allow_legacy_global_visibility: bool = os.getenv(
+        "KNOWLEDGE_OPS_ALLOW_LEGACY_GLOBAL_VISIBILITY", "0"
+    ) == "1"
+
     enable_qdrant: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_QDRANT", "0") == "1"
     enable_center_deep: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_CENTER_DEEP", "0") == "1"
     enable_falkordb: bool = os.getenv("KNOWLEDGE_OPS_ENABLE_FALKORDB", "0") == "1"

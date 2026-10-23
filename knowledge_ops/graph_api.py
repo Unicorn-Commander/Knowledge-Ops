@@ -241,7 +241,9 @@ def _visible_wiki_docs(principal: Principal, scope: str | None) -> list[dict]:
     init_db()
     with connect() as db:
         rows = db.execute(
-            """SELECT path, title, body, scope, owner FROM wiki_docs
+            """SELECT path, title, body, scope, owner,
+                      visibility_workspace_id, visibility_project_id
+               FROM wiki_docs
                WHERE lifecycle_state='active' ORDER BY path"""
         ).fetchall()
     return [doc for doc in (dict(row) for row in rows) if can_read_record(principal, doc, scope)]

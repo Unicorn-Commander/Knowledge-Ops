@@ -55,13 +55,14 @@ def kb_get_doc(id: str) -> dict:
 def kb_upsert_doc(
     path: str, md: str, scope: str = "personal", owner: str = "",
     valid_from: str = "", valid_until: str = "", supersedes_id: str = "",
-    review_due_at: str = "",
+    review_due_at: str = "", metadata: dict | None = None,
+    visibility: dict | None = None,
 ) -> dict:
     target_scope, target_owner = authorized_write_target(_LOCAL, scope, owner)
     return {"id": upsert_doc(
         path, md, target_scope, target_owner, valid_from=valid_from or None,
         valid_until=valid_until or None, supersedes_id=supersedes_id or None,
-        review_due_at=review_due_at or None,
+        review_due_at=review_due_at or None, metadata=metadata, visibility=visibility,
     )}
 
 

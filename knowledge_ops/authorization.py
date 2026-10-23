@@ -36,6 +36,7 @@ class Principal:
     workspaces: frozenset[str] = field(default_factory=frozenset)
     issuer: str = ""
     authenticated: bool = True
+    projects: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def is_admin(self) -> bool:
@@ -72,6 +73,89 @@ def _strings(value: Any) -> set[str]:
     return set()
 
 
+def _claim_ids(*values: Any) -> set[str]:
+    """Extract bounded identifier claims without trusting arbitrary nested data."""
+    found: set[str] = set()
+    for value in values:
+        if isinstance(value, dict):
+            value = value.get("id") or value.get("value")
+        found |= _strings(value)
+    return found
+
+
+def normalize_visibility(
+    value: Any = None,
+    *,
+    metadata: Any = None,
+) -> dict[str, str] | None:
+    """Normalize an optional receiver-side workspace/project binding.
+
+    Producers may send the identifiers directly in source metadata or under an
+    explicit ``visibility`` object. A project without its workspace is
+    ambiguous and is rejected rather than treated as globally visible.
+    """
+    raw: dict[str, Any] = {}
+    for candidate in (metadata,):
+        if not isinstance(candidate, dict):
+            continue
+        nested = candidate.get("visibility")
+        if nested is not None:
+            if not isinstance(nested, dict):
+                raise ValueError("visibility metadata must be an object")
+            raw.update(nested)
+        for key in ("workspace_id", "project_id"):
+            if key in candidate:
+                raw[key] = candidate[key]
+    if value is not None:
+        if not isinstance(value, dict):
+            raise ValueError("visibility must be an object")
+        raw.update(value)
+
+    present = {key for key in ("workspace_id", "project_id") if key in raw}
+    if not present:
+        return None
+    workspace_id = str(raw.get("workspace_id") or "").strip()
+    project_id = str(raw.get("project_id") or "").strip()
+    if not workspace_id:
+        raise ValueError("visibility.workspace_id is required")
+    if any(len(item) > 200 or any(ord(char) < 32 for char in item) for item in (workspace_id, project_id) if item):
+        raise ValueError("visibility identifiers are invalid")
+    binding = {"workspace_id": workspace_id}
+    if project_id:
+        binding["project_id"] = project_id
+    return binding
+
+
+def record_visibility(record: dict[str, Any]) -> dict[str, str] | None:
+    """Read a canonical or adapter record's normalized visibility binding."""
+    metadata = record.get("metadata")
+    explicit = record.get("visibility")
+    if explicit is None and (record.get("visibility_workspace_id") or record.get("visibility_project_id")):
+        explicit = {
+            "workspace_id": record.get("visibility_workspace_id"),
+            "project_id": record.get("visibility_project_id"),
+        }
+    return normalize_visibility(explicit, metadata=metadata)
+
+
+def can_read_visibility(
+    principal: Principal,
+    binding: dict[str, str] | None,
+    *,
+    scope: str,
+) -> bool:
+    """Apply the receiver-side workspace/project gate to one record."""
+    if principal.is_admin:
+        return True
+    if binding is None:
+        return scope != "global" or settings.allow_legacy_global_visibility
+    workspace_id = binding["workspace_id"]
+    if workspace_id not in principal.workspaces:
+        return False
+    project_id = binding.get("project_id")
+    return not project_id or project_id in principal.projects
+
+
 def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Principal:
     subject = str(claims.get("sub") or "").strip()
     if not subject:
@@ -101,7 +185,12 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
         value = str(claims.get(key) or "").strip().lower()
         if value:
             identities.add(value)
-    workspaces = _strings(claims.get("workspace_id")) | _strings(claims.get("workspaces"))
+    workspace_claim = claims.get("workspace")
+    workspaces = _claim_ids(claims.get("workspace_id"), claims.get("workspaces"), workspace_claim)
+    projects = _claim_ids(
+        claims.get("project_id"), claims.get("project_ids"), claims.get("projects"),
+        claims.get("project"),
+    )
     return Principal(
         subject=subject,
         scopes=frozenset(scopes),
@@ -109,6 +198,7 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
         identities=frozenset(identities),
         workspaces=frozenset(workspaces),
         issuer=str(claims.get("iss") or ""),
+        projects=frozenset(projects),
     )
 
 
@@ -234,6 +324,12 @@ def can_read_passage(principal: Principal, passage: Passage, requested_scope: st
         return False
     if requested_scope and str(requested_scope).startswith("workspace:") and passage.scope != requested_scope:
         return False
+    try:
+        binding = record_visibility(passage.__dict__)
+    except ValueError:
+        return False
+    if not can_read_visibility(principal, binding, scope=passage.scope):
+        return False
     if passage.scope == "global":
         return True
     if passage.scope == "personal":
@@ -255,6 +351,8 @@ def sqlite_visibility_clause(
     *,
     scope_column: str = "scope",
     owner_column: str = "owner",
+    workspace_column: str = "visibility_workspace_id",
+    project_column: str = "visibility_project_id",
 ) -> tuple[str, tuple[str, ...]]:
     """Build a parameterized native-store visibility predicate.
 
@@ -264,21 +362,61 @@ def sqlite_visibility_clause(
     """
     principal.require("read:knowledge")
     validate_requested_scope(principal, requested_scope)
-    if principal.is_admin and requested_scope in (None, "", "all"):
-        return "1=1", ()
+    if principal.is_admin:
+        if requested_scope in (None, "", "all"):
+            return "1=1", ()
+        return f"{scope_column}=?", (requested_scope,)
+
+    workspace_ids = tuple(sorted(identity for identity in principal.workspaces if identity))
+    if workspace_ids:
+        workspace_slots = ",".join("?" for _ in workspace_ids)
+        project_ids = tuple(sorted(identity for identity in principal.projects if identity))
+        if project_ids:
+            project_slots = ",".join("?" for _ in project_ids)
+            project_match = f"{project_column} IS NULL OR {project_column} IN ({project_slots})"
+            project_params = project_ids
+        else:
+            project_match = f"{project_column} IS NULL"
+            project_params = ()
+        bound = f"({workspace_column} IN ({workspace_slots}) AND ({project_match}))"
+        bound_params = (*workspace_ids, *project_params)
+    else:
+        bound = "0=1"
+        bound_params = ()
+    legacy = "1=1" if settings.allow_legacy_global_visibility else "0=1"
+    binding = (
+        f"(({workspace_column} IS NULL AND {project_column} IS NULL AND "
+        f"({scope_column} != 'global' OR {legacy})) OR {bound})"
+    )
+
+    def scoped(clause: str, clause_params: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+        return f"({clause} AND {binding})", (*clause_params, *bound_params)
+
     if requested_scope == "global":
-        return f"{scope_column}=?", ("global",)
+        return scoped(f"{scope_column}=?", ("global",))
+    if requested_scope and str(requested_scope).startswith("workspace:"):
+        return scoped(f"{scope_column}=?", (requested_scope,))
     owners = tuple(sorted(identity.lower() for identity in principal.identities if identity))
     if not owners:
         return "0=1", ()
     owner_slots = ",".join("?" for _ in owners)
     personal = f"({scope_column}=? AND lower({owner_column}) IN ({owner_slots}))"
     if requested_scope == "personal":
-        return personal, ("personal", *owners)
-    return f"({scope_column}=? OR {personal})", ("global", "personal", *owners)
+        return scoped(personal, ("personal", *owners))
+    global_clause, global_params = scoped(f"{scope_column}=?", ("global",))
+    personal_clause, personal_params = scoped(personal, ("personal", *owners))
+    return f"({global_clause} OR {personal_clause})", (*global_params, *personal_params)
 
 
 def can_read_record(principal: Principal, record: dict[str, Any], requested_scope: str | None = None) -> bool:
+    metadata = dict(record.get("metadata") or {})
+    if record.get("visibility") is not None:
+        metadata["visibility"] = record["visibility"]
+    elif record.get("visibility_workspace_id") or record.get("visibility_project_id"):
+        metadata["visibility"] = {
+            "workspace_id": record.get("visibility_workspace_id"),
+            "project_id": record.get("visibility_project_id"),
+        }
     passage = Passage(
         source="authorization",
         source_id=str(record.get("id") or ""),
@@ -287,6 +425,7 @@ def can_read_record(principal: Principal, record: dict[str, Any], requested_scop
         score=0,
         scope=str(record.get("scope") or "restricted"),
         owner=str(record.get("owner") or ""),
+        metadata=metadata,
     )
     return can_read_passage(principal, passage, requested_scope)
 
