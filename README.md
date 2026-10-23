@@ -1,236 +1,120 @@
 # Knowledge-Ops
 
-Knowledge-Ops is Magic Unicorn's governed evidence and memory layer: one authorized, cited retrieval surface for humans, apps, and Brigade agents. It retrieves evidence from the canonical wiki, indexed files, org memory, Qdrant, FalkorDB, Center Deep, REST, and read-only SQL without making callers know where each store lives. Automated evidence relationships are labeled heuristic and are not represented as factual verification.
+Knowledge-Ops is a governed evidence and memory service. It keeps canonical
+documents in a versioned wiki, indexes local files, and returns cited results
+through REST and HTTP-MCP. Automated grounding is labeled as heuristic rather
+than presented as factual verification.
 
-Public dogfood: `https://knowledge-ops.magicunicorn.dev`  
-Human GUI: `/ui/`  
-Brokered agent surface: `/mcp` with namespace `knowledge`
+## Quickstart
 
-![Knowledge-Ops GUI](docs/screenshots/knowledge-ops-gui.png)
-
-## What It Does
-
-- Retrieves evidence with citations and conservative contradiction/abstention labels.
-- Curates canonical docs in a versioned markdown wiki.
-- Applies temporal validity, supersession, governed tombstones, and deletion propagation to native memory.
-- Queues stale or conflicting knowledge for review and records idempotent refresh runs.
-- Stages OpenWiki/OKF output behind security and human-review gates before canonical promotion.
-- Searches native and federated stores through one API.
-- Preserves app ownership: Knowledge-Ops reads external stores, it does not take over their write paths.
-- Exposes the same capabilities to the GUI, REST clients, and Brigade MCP tools.
-- Registers the Librarian as the knowledge-domain agent that uses this surface.
-
-## Architecture
-
-Knowledge-Ops uses a dual-layer federation model.
-
-```mermaid
-flowchart LR
-  Human[Human / GUI] --> KO[Knowledge-Ops API]
-  Agent[Brigade agents] --> Broker[Brigade broker]
-  Broker --> MCP[/Knowledge-Ops /mcp/]
-  MCP --> KO
-  Apps[Suite apps] --> KO
-
-  KO --> Native[Native stores]
-  Native --> Wiki[Wiki: markdown + SQLite]
-  Native --> Files[File index: SQLite FTS]
-  Native --> Metrics[Metrics: SQLite timeseries]
-  Native --> Memory[Org memory JSONL]
-
-  KO --> Federated[Federated stores]
-  Federated --> Qdrant[Qdrant collections]
-  Federated --> Falkor[FalkorDB graphs]
-  Federated --> REST[REST adapters]
-  Federated --> SQL[Read-only Postgres adapters]
-  Federated --> CenterDeep[Center Deep Data Intel]
-```
-
-Native stores are owned by Knowledge-Ops. Federated stores remain owned by the source app. The fan-out merges and re-ranks passages, enforces identity-derived visibility, and returns cited evidence.
-
-OpenWiki is a producer outside this trust boundary. Its governed import contract is documented in [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md). Temporal, deletion, review, refresh, and evaluation semantics are documented in [Governed Memory Lifecycle](docs/MEMORY-LIFECYCLE.md).
-
-## GUI
-
-The GUI is served directly by FastAPI at `/ui/`, with no build step. It includes Ask with source-span inspection, lifecycle-aware Library, OpenWiki and memory-quality Review, Files, Sources, and refresh-aware Operations.
-
-![Federated sources](docs/screenshots/knowledge-ops-sources.png)
-
-The public host is behind Keycloak SSO via oauth2-proxy. `/health`, `/.well-known/mcps.json`, and `/mcp` are public for monitoring and broker operation; `/mcp` tool calls still require the Brigade JWT in production.
-
-![SSO gate](docs/screenshots/knowledge-ops-sso-gate.png)
-
-## Consume It
-
-Production REST calls require a signed Keycloak or Brigade bearer token. Local
-loopback compose explicitly disables API auth for development only.
-
-REST:
-
-```bash
-curl -s -X POST https://knowledge-ops.magicunicorn.dev/kb.ground \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"What is Magic Unicorn?","scope":"global","k":6}'
-```
-
-MCP via Brigade:
-
-- `knowledge.search`
-- `knowledge.ground`
-- `knowledge.list_sources`
-- `knowledge.get_doc`
-- `knowledge.list_docs`
-- `knowledge.doc_history`
-- `knowledge.find_file`
-- `knowledge.deep_read`
-- `knowledge.upsert_doc`
-- `knowledge.record_metric`
-
-REST routes are dot-style: `/kb.search`, `/kb.ground`, `/kb.list_sources`, not `/kb/search`.
-
-Optional source filters:
-
-- `wiki`, `file_index`, `org_memory`, `qdrant`, `falkordb`, `center_deep`
-- `qdrant:meeting_transcripts`
-- `qdrant:crisis_evidence`
-- `falkordb:brigade_global`
-- `rest:<adapter_name>`
-- `postgres:<adapter_name>`
-
-## Federated Sources
-
-Current live wiring includes:
-
-- Qdrant: `org_memory`, `stable_documents`, `meeting_transcripts`, `crisis_evidence`, `contact_ops_person_voice`
-- FalkorDB: `brigade_global`, `org_memory`, `brigade_knowledge`, `brigade_memories`, `agent_meeting_ops_canonical`, Contact-Ops graphs, Customer-Ops graph, `majiks_research`
-- Center Deep Data Intel: `/api/v1/catalogue/quick-search`
-- Native wiki, file index, metrics, and org-memory JSONL
-
-`contact_ops_person_voice` is present but empty on the live Qdrant instance at the time of wiring. SQL-backed app adapters are supported by config and should keep credentials in host env files, not git.
-
-## Add A Source Adapter
-
-For code adapters, add a module under `knowledge_ops/adapters/` that returns `list[Passage]`, wire it in `federation.search`, and add status rows in `list_sources`.
-
-For config-only REST adapters:
-
-```bash
-export KNOWLEDGE_OPS_REST_SOURCES='[
-  {
-    "name": "example_app",
-    "url": "https://example.internal/api/search",
-    "method": "GET",
-    "enforces_authorization": true,
-    "scope": "global",
-    "query_param": "q",
-    "limit_param": "limit",
-    "results_key": "results"
-  }
-]'
-```
-
-For config-only Postgres adapters:
-
-```bash
-export KNOWLEDGE_OPS_POSTGRES_SOURCES='[
-  {
-    "name": "accounting_ops",
-    "dsn": "postgresql://readonly_user:REMOVED@accounting-postgres:5432/accounting",
-    "enforces_authorization": true,
-    "scope": "global",
-    "sql": "select id, title, body as text, scope, owner, uri from knowledge_docs where search_vector @@ plainto_tsquery(%(query)s) and (scope = 'global' or (scope = 'personal' and owner = %(owner)s)) limit %(k)s"
-  }
-]'
-```
-
-REST and Postgres adapters are disabled unless `enforces_authorization=true` explicitly records that the upstream query uses the supplied `scope` and `owner` identity parameters. Postgres queries must be `SELECT` statements containing an `%(owner)s` or `%(owners)s` identity placeholder and should return `id`, `title`, and `text`, with `scope` and `owner` classifications plus optional `uri` and `score`. The adapter starts a read-only transaction and degrades to empty results on failure.
-
-## Security Model
-
-- Every `/kb.*` data request is authorized inside the app with a verified Keycloak or Brigade token; edge SSO alone is not authorization.
-- Brigade calls `/mcp` with an RS256 JWT, `aud=knowledge-ops`, and every tool enforces its manifest scopes.
-- Omitted scope means shared global plus the caller's own personal knowledge. `all`, restricted sources, global writes, indexing, and OpenWiki promotion require explicit privileges.
-- Personal owner values are derived from verified token identity, never request input. For OIDC, stable `sub` is authoritative and email is a legacy alias only when `email_verified` is exactly `true`; schema v3 transactionally moves native email-owned rows to `sub` and stores only an alias digest in its receipt. Mutable usernames do not confer ownership. Unknown source classification is restricted, not global.
-- Wiki paths and file roots are confined and symlinks are rejected. Request body, rate, and result-count bounds are enforced.
-- SQLite is canonical for wiki documents; atomic Markdown projections are reconciled at startup after a crash.
-- Federated adapters are read-only. Qdrant uses search only; FalkorDB uses `GRAPH.RO_QUERY`; Postgres queries are read-only `SELECT`.
-- Secrets stay out of git. Use host env files for DB DSNs and bearer tokens.
-
-## The Librarian
-
-The Librarian is the knowledge-domain Brigade agent:
-
-- Agent id: `librarian`
-- Display name: `the Librarian`
-- Model: `local/Qwen_Qwen3.6-35B-A3B-Q4_K_M`
-- Domain: `knowledge`
-- Tools: Knowledge-Ops MCP tools plus `memory`
-- Brand-Ops identity: `knowledge-ops/the-librarian`
-- Avatar: `https://brand-ops.magicunicorn.dev/api/brands/knowledge-ops/agents/the-librarian/avatar`
-- Voice: `bf_emma` via `kokoro-onnx` at speed `0.96`
-- Behavior: answer only from cited evidence, curate and maintain the wiki, ingest and organize docs, flag stale areas and gaps, and say "not found" when evidence is missing.
-
-Rollback:
-
-```sql
-DELETE FROM agents WHERE id = 'librarian';
-```
-
-## Deploy
-
-Local:
+On a fresh Linux host with Docker Engine and the Docker Compose plugin, run the
+README block emitted by the installer:
 
 ```bash
 docker compose up -d --build
+curl -fsS http://127.0.0.1:8765/ready
 ```
 
-Bigboy:
+The second command succeeds only when the SQLite database, schema, wiki, and
+OpenWiki staging directories are ready. The standalone compose publishes the
+service on loopback only, uses local SQLite volumes, keeps optional live
+adapters disabled, and does not ingest the image-baked wiki corpus.
+
+No `.env` file is needed for this quickstart. `.env.example` lists safe,
+non-secret overrides for a local deployment. If you create `.env`, keep it
+local and untracked.
+
+## Bootstrap admin and agent credential
+
+The standalone compose starts a local issuer and generates one bootstrap admin
+bearer token on the first run. The signing key, public JWK, and token live in
+the dedicated `knowledge_ops_bootstrap_auth` Docker volume, which is mounted
+only by `knowledge-ops-auth`; the API and optional worker receive the public
+JWKS over the Compose network and do not mount this volume. The token is not
+printed by the service or stored in this repository. It is valid for 90 days;
+restarting the stack does not replace it while it remains valid.
+
+After the quickstart is running, read the token once into a shell variable and
+verify the bootstrap identity through the issuer container:
 
 ```bash
-rsync -az --delete --exclude .git ./ magicunicorn:/home/muut/Knowledge-Ops/
-ssh magicunicorn 'cd /home/muut/Knowledge-Ops && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker up -d --build'
+ADMIN_TOKEN="$(docker compose run --rm --no-deps --entrypoint cat knowledge-ops-auth /data/bootstrap-auth/bootstrap-admin.token)"
+curl -fsS http://127.0.0.1:8765/kb.me -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-Verify:
+The response has `name` `bootstrap-admin` and `is_admin` `true`. An agent can
+use this same local bearer credential for the authenticated REST routes or the
+loopback `/mcp` JSON-RPC endpoint. Keep it in a secret transport or process
+environment; never paste it into a commit, issue, log, or chat transcript.
+
+This local credential is the self-host token route; this tree does not claim to
+provide a hosted signup or a per-agent PAT service. A public or multi-user
+deployment must replace the local issuer settings with its own trusted OIDC or
+broker issuer before exposing the application beyond loopback. Auth-off is
+acceptable only when the API remains bound to `127.0.0.1`.
+
+## API examples
+
+With `ADMIN_TOKEN` set as above, an agent can ground a question:
 
 ```bash
-curl -s https://knowledge-ops.magicunicorn.dev/health
-curl -s https://knowledge-ops.magicunicorn.dev/.well-known/mcps.json
-ssh magicunicorn "cd /home/muut/Knowledge-Ops && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker exec -T knowledge-ops python -c 'import json,urllib.request; value=json.load(urllib.request.urlopen(\"http://127.0.0.1:8765/ready\")); assert value[\"ok\"] and value[\"checks\"][\"worker\"]; print(json.dumps(value))'"
+curl -fsS -X POST http://127.0.0.1:8765/kb.ground \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What evidence is available?","scope":"global","k":6}'
 ```
 
-`/health` proves only that the API process is alive. Production acceptance
-requires the internal `/ready` assertion above to report a fresh worker.
+REST routes use dot notation, including `/kb.search`, `/kb.ground`,
+`/kb.list_sources`, and `/kb.docs`. The HTTP-MCP endpoint is `/mcp`; its JSON-RPC
+tools use the `knowledge` namespace. Every authenticated request is authorized
+inside the application, not merely by a front proxy.
 
-Rollback deploy:
+## Storage and safety defaults
 
-```bash
-ssh magicunicorn 'cd /home/muut/Knowledge-Ops && cp docker-compose.bigboy.yml.bak-pre-gui-20260627 docker-compose.bigboy.yml && docker compose -f docker-compose.yml -f docker-compose.bigboy.yml --profile worker up -d --build'
-```
+- SQLite data and wiki projections persist in named Docker volumes.
+- `KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS=0` is pinned in the standalone compose.
+  The build also refuses seed Markdown unless an operator explicitly selects an
+  internal edition.
+- Qdrant, FalkorDB, and other live adapters are disabled until an operator
+  supplies an authorized, identity-aware configuration.
+- Credentials for external adapters belong in host-only environment files. Do
+  not put values in this repository.
+- The local issuer is reachable only inside the Compose network. Its generated
+  key and token stay on the auth-only `knowledge_ops_bootstrap_auth` volume;
+  the token file is mode `0600`.
 
-## Tests
+## Optional configuration
+
+Copy the names from `.env.example` into a host-only `.env` when changing local
+defaults. The important controls are:
+
+- `KNOWLEDGE_OPS_API_REQUIRE_AUTH`
+- `KNOWLEDGE_OPS_API_AUDIENCE`
+- `KNOWLEDGE_OPS_API_OIDC_JWKS_URL`
+- `KNOWLEDGE_OPS_API_TRUSTED_ISSUERS`
+- `KNOWLEDGE_OPS_MCP_JWKS_URL`
+- `KNOWLEDGE_OPS_MCP_AUDIENCE`
+- `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS`
+- `KNOWLEDGE_OPS_ENABLE_QDRANT`
+- `KNOWLEDGE_OPS_ENABLE_FALKORDB`
+- `KNOWLEDGE_OPS_ENABLE_CENTER_DEEP`
+- `KNOWLEDGE_OPS_REQUIRE_WORKER`
+
+The API and MCP issuer/audience values must describe the same trusted signer
+that mints the bearer presented by the client. Do not set auth off on a
+non-loopback bind.
+
+## Development checks
+
+The application test suite is deterministic and offline:
 
 ```bash
 python3 -m pytest -q
 python3 -m knowledge_ops.cli evaluate-memory
-docker compose --profile worker config --quiet
 ```
 
-The memory evaluation is deterministic, isolated, and offline. Production
-refresh scheduling is handled by the durable worker profile. Live connector and
-source-owner deletion adapters remain disabled until an operator explicitly
-wires their process-owned authentication. Knowledge-Ops stores only
-credential-free job and outbox contracts. See
-[Operations Runbook](docs/OPERATIONS-RUNBOOK.md) for worker, alerting, backup,
-restore, and external dependency procedures.
-
-Runtime dependencies are pinned with artifact hashes in `requirements.lock`.
-CI also scans the built production image for high and critical vulnerabilities
-and retains a CycloneDX image SBOM with each successful verification run.
-Regenerate it with Python 3.12 and `pip-tools==7.6.0` after changing project
-dependencies:
-
-```bash
-python3.12 -m piptools compile pyproject.toml --extra all --generate-hashes --strip-extras --output-file requirements.lock
-```
+The worker is optional in the standalone path. Enable it only when a deployment
+needs durable refresh scheduling and has configured its process-owned adapter
+access. See [Operations Runbook](docs/OPERATIONS-RUNBOOK.md), [OpenWiki
+Governance](docs/OPENWIKI-GOVERNANCE.md), and [Governed Memory Lifecycle](docs/MEMORY-LIFECYCLE.md)
+for the application contracts.

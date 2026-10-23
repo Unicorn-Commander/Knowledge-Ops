@@ -1,13 +1,138 @@
-# Knowledge-Ops base compose — standalone / Mac-runnable.
-# Live store adapters (Qdrant/FalkorDB) are OFF here so this comes up anywhere.
-# For bigboy (next to the real stores + Brigade), layer the override:
-#   docker compose -f docker-compose.yml -f docker-compose.bigboy.yml up -d
+# Knowledge-Ops standalone compose.
+#
+# The API and its local bootstrap issuer are self-contained. Optional live
+# adapters stay disabled so this file can boot on a fresh Linux host.
 services:
+  knowledge-ops-auth:
+    build: .
+    image: knowledge-ops:0.7.1
+    container_name: knowledge-ops-auth
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      # The issuer's key, JWK, and bootstrap token stay on an auth-only volume.
+      - knowledge_ops_bootstrap_auth:/data
+    command:
+      - python
+      - -c
+      - |
+          import hashlib
+          import json
+          import os
+          import time
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          import jwt
+          from cryptography.hazmat.primitives import serialization
+          from cryptography.hazmat.primitives.asymmetric import rsa
+
+          state = Path("/data/bootstrap-auth")
+          state.mkdir(mode=0o700, parents=True, exist_ok=True)
+          state.chmod(0o700)
+          key_path = state / "bootstrap-admin.key"
+          jwk_path = state / "bootstrap-admin.jwk.json"
+          token_path = state / "bootstrap-admin.token"
+          issuer = "http://knowledge-ops-auth:8766"
+          audience = "knowledge-ops"
+
+          def write_private(path, value, mode):
+              temporary = path.with_name(path.name + ".tmp")
+              with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode), "wb") as stream:
+                  stream.write(value)
+                  stream.flush()
+                  os.fsync(stream.fileno())
+              os.chmod(temporary, mode)
+              os.replace(temporary, path)
+
+          try:
+              key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+          except (FileNotFoundError, ValueError, TypeError):
+              key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+              write_private(
+                  key_path,
+                  key.private_bytes(
+                      encoding=serialization.Encoding.PEM,
+                      format=serialization.PrivateFormat.PKCS8,
+                      encryption_algorithm=serialization.NoEncryption(),
+                  ),
+                  0o600,
+              )
+
+          public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+          public.update({
+              "kid": hashlib.sha256(public["n"].encode()).hexdigest()[:24],
+              "alg": "RS256",
+              "use": "sig",
+          })
+          jwks = json.dumps({"keys": [public]}, separators=(",", ":")).encode()
+          write_private(jwk_path, jwks, 0o644)
+
+          def token_is_current(raw):
+              try:
+                  jwt.decode(raw, key.public_key(), algorithms=["RS256"], audience=audience, issuer=issuer)
+                  return True
+              except Exception:
+                  return False
+
+          try:
+              token = token_path.read_text(encoding="utf-8").strip()
+          except FileNotFoundError:
+              token = ""
+          if not token or not token_is_current(token):
+              now = int(time.time())
+              token = jwt.encode(
+                  {
+                      "iss": issuer,
+                      "sub": "bootstrap-admin",
+                      "aud": audience,
+                      "iat": now,
+                      "exp": now + 90 * 24 * 60 * 60,
+                      "scope": "admin:knowledge read:knowledge write:knowledge write:knowledge:global",
+                      "realm_access": {"roles": ["knowledge-admin"]},
+                  },
+                  key,
+                  algorithm="RS256",
+                  headers={"kid": public["kid"]},
+              )
+              write_private(token_path, token.encode(), 0o600)
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.path != "/.well-known/jwks.json":
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+                  body = jwks
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def log_message(self, format, *args):
+                  return
+
+          ThreadingHTTPServer(("0.0.0.0", 8766), Handler).serve_forever()
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/.well-known/jwks.json', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   knowledge-ops:
     build: .
     image: knowledge-ops:0.7.1
     container_name: knowledge-ops
     restart: unless-stopped
+    depends_on:
+      knowledge-ops-auth:
+        condition: service_healthy
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -24,23 +149,26 @@ services:
       KNOWLEDGE_OPS_DB: /data/knowledge_ops.sqlite3
       KNOWLEDGE_OPS_WIKI: /wiki
       KNOWLEDGE_OPS_OPENWIKI_STAGING: /data/openwiki/staging
-      # Image-baked seed corpus: OFF, and it stays off for every customer and
-      # per-org deploy. seed_wiki_from_disk() ingests every *.md under /wiki as
-      # scope=global owner=magic-unicorn, i.e. readable by everyone on the
-      # instance. On 2026-09-15 that had put two Magic Unicorn internal documents
-      # into the customer-facing KB with no human involved (P-00099 finding 3).
-      # Only the internal ring sets this to "1" — see docker-compose.bigboy.yml.
+      # The image-baked corpus is never ingested by the standalone edition.
       KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS: "0"
-      # Explicit local-dev trust boundary: unauthenticated API is bound only to
-      # 127.0.0.1 above. Production override resets this to authenticated.
-      KNOWLEDGE_OPS_API_REQUIRE_AUTH: "0"
-      # Live adapters default OFF. Enable via the bigboy override (or set =1 here
-      # plus the matching *_URL envs if your stores are reachable).
+      # The API is authenticated by the generated local issuer. Set this to 0
+      # only while the service remains bound to the loopback host port above.
+      KNOWLEDGE_OPS_API_REQUIRE_AUTH: "${KNOWLEDGE_OPS_API_REQUIRE_AUTH:-1}"
+      KNOWLEDGE_OPS_API_AUDIENCE: "${KNOWLEDGE_OPS_API_AUDIENCE:-knowledge-ops}"
+      KNOWLEDGE_OPS_API_OIDC_JWKS_URL: "${KNOWLEDGE_OPS_API_OIDC_JWKS_URL:-http://knowledge-ops-auth:8766/.well-known/jwks.json}"
+      KNOWLEDGE_OPS_API_TRUSTED_ISSUERS: "${KNOWLEDGE_OPS_API_TRUSTED_ISSUERS:-http://knowledge-ops-auth:8766}"
+      KNOWLEDGE_OPS_API_DEFAULT_OIDC_SCOPES: "${KNOWLEDGE_OPS_API_DEFAULT_OIDC_SCOPES:-read:knowledge}"
+      # The same local credential works for loopback HTTP-MCP. A deployment
+      # override must replace these values with its own trusted issuer.
+      KNOWLEDGE_OPS_MCP_JWKS_URL: "${KNOWLEDGE_OPS_MCP_JWKS_URL:-http://knowledge-ops-auth:8766/.well-known/jwks.json}"
+      KNOWLEDGE_OPS_MCP_AUDIENCE: "${KNOWLEDGE_OPS_MCP_AUDIENCE:-knowledge-ops}"
+      KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS: "${KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS:-http://knowledge-ops-auth:8766}"
+      # Live adapters default OFF. Enable only with explicit, authorized
+      # upstream configuration in a deployment-specific override.
       KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
       KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
       KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
-      # API readiness reports worker state, but standalone API-only development
-      # does not require the optional worker profile.
+      # API-only standalone operation does not require the optional worker.
       KNOWLEDGE_OPS_REQUIRE_WORKER: "${KNOWLEDGE_OPS_REQUIRE_WORKER:-0}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/ready', timeout=5).read()"]
@@ -73,8 +201,6 @@ services:
       KNOWLEDGE_OPS_ENABLE_QDRANT: "0"
       KNOWLEDGE_OPS_ENABLE_FALKORDB: "0"
       KNOWLEDGE_OPS_ENABLE_CENTER_DEEP: "0"
-      # No live adapter is imported or activated by the base image. Source
-      # deletion targets are logical names only and default to an empty map.
       KNOWLEDGE_OPS_DELETION_TARGETS: "{}"
     healthcheck:
       test: ["CMD", "knowledge-ops", "worker-health"]
@@ -84,5 +210,6 @@ services:
       start_period: 10s
 
 volumes:
+  knowledge_ops_bootstrap_auth:
   knowledge_ops_data:
   knowledge_ops_wiki:
