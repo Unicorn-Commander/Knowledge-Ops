@@ -1,4 +1,5 @@
 """Static acceptance checks for the stranger-facing standalone compose."""
+
 from __future__ import annotations
 
 import re
@@ -39,6 +40,20 @@ def test_standalone_compose_keeps_the_public_boundary_and_seed_off():
     assert app["depends_on"]["knowledge-ops-auth"]["condition"] == "service_healthy"
 
 
+def test_bootstrap_auth_volume_is_not_mounted_into_api_or_worker():
+    services = COMPOSE["services"]
+    auth_mounts = [str(mount) for mount in services["knowledge-ops-auth"]["volumes"]]
+
+    assert "knowledge_ops_bootstrap_auth:/data" in auth_mounts
+    assert "knowledge_ops_data:/data" not in auth_mounts
+    assert "knowledge_ops_bootstrap_auth" in COMPOSE["volumes"]
+
+    for service_name in ("knowledge-ops", "knowledge-ops-worker"):
+        mounts = [str(mount) for mount in services[service_name]["volumes"]]
+        assert all("knowledge_ops_bootstrap_auth" not in mount for mount in mounts)
+        assert all("/data/bootstrap-auth" not in mount for mount in mounts)
+
+
 def test_bootstrap_issuer_generates_a_persisted_admin_credential_without_a_secret_literal():
     command = "\n".join(COMPOSE["services"]["knowledge-ops-auth"]["command"])
     assert "bootstrap-admin.token" in command
@@ -46,7 +61,9 @@ def test_bootstrap_issuer_generates_a_persisted_admin_credential_without_a_secre
     assert "ThreadingHTTPServer" in command
     assert "knowledge-admin" in command
     assert "90 * 24 * 60 * 60" in command
-    assert not re.search(r"password\s*[:=]\s*['\"][^'\"]+['\"]", COMPOSE_TEXT, re.IGNORECASE)
+    assert not re.search(
+        r"password\s*[:=]\s*['\"][^'\"]+['\"]", COMPOSE_TEXT, re.IGNORECASE
+    )
 
 
 def test_public_selfhost_files_do_not_reference_private_deployment_names():

@@ -14,7 +14,8 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
     volumes:
-      - knowledge_ops_data:/data
+      # The issuer's key, JWK, and bootstrap token stay on an auth-only volume.
+      - knowledge_ops_bootstrap_auth:/data
     command:
       - python
       - -c
@@ -209,5 +210,6 @@ services:
       start_period: 10s
 
 volumes:
+  knowledge_ops_bootstrap_auth:
   knowledge_ops_data:
   knowledge_ops_wiki:

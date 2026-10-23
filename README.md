@@ -27,15 +27,18 @@ local and untracked.
 ## Bootstrap admin and agent credential
 
 The standalone compose starts a local issuer and generates one bootstrap admin
-bearer token on the first run. The token and signing key live in the Docker
-volume, are not printed by the service, and are not stored in this repository.
-The token is valid for 90 days; restarting the stack does not replace it while
-it remains valid.
+bearer token on the first run. The signing key, public JWK, and token live in
+the dedicated `knowledge_ops_bootstrap_auth` Docker volume, which is mounted
+only by `knowledge-ops-auth`; the API and optional worker receive the public
+JWKS over the Compose network and do not mount this volume. The token is not
+printed by the service or stored in this repository. It is valid for 90 days;
+restarting the stack does not replace it while it remains valid.
 
-Read the token into a shell variable and verify the bootstrap identity:
+After the quickstart is running, read the token once into a shell variable and
+verify the bootstrap identity through the issuer container:
 
 ```bash
-ADMIN_TOKEN="$(docker compose exec -T knowledge-ops-auth cat /data/bootstrap-auth/bootstrap-admin.token)"
+ADMIN_TOKEN="$(docker compose run --rm --no-deps --entrypoint cat knowledge-ops-auth /data/bootstrap-auth/bootstrap-admin.token)"
 curl -fsS http://127.0.0.1:8765/kb.me -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
@@ -76,8 +79,9 @@ inside the application, not merely by a front proxy.
   supplies an authorized, identity-aware configuration.
 - Credentials for external adapters belong in host-only environment files. Do
   not put values in this repository.
-- The local issuer is reachable only inside the Compose network. The generated
-  token file is mode `0600` in the data volume.
+- The local issuer is reachable only inside the Compose network. Its generated
+  key and token stay on the auth-only `knowledge_ops_bootstrap_auth` volume;
+  the token file is mode `0600`.
 
 ## Optional configuration
 
