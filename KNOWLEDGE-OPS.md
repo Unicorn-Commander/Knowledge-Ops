@@ -23,7 +23,7 @@ MCP tool names mirror the requested interface:
 - `kb.ground(claim, scope?, sources?, k?, as_of?)`
 - `kb.list_sources()`
 - `kb.get_doc(id)`
-- `kb.upsert_doc(path, md, validity?, supersedes_id?, review_due_at?)`
+- `kb.upsert_doc(path, md, validity?, supersedes_id?, review_due_at?, metadata?, visibility?)`
 - `kb.inspect_citation(source, source_id, claim)`
 - `kb.delete_doc(id, reason)`
 - `kb.list_docs()`
@@ -69,7 +69,7 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | GET  | `/kb.list_sources` | source catalog + enabled/disabled status |
 | GET  | `/kb.docs` | list wiki docs |
 | GET  | `/kb.get_doc?id=...` | one wiki doc |
-| POST | `/kb.upsert_doc` | body: `{path, md, scope?, owner?, valid_from?, valid_until?, supersedes_id?, review_due_at?}` |
+| POST | `/kb.upsert_doc` | body: `{path, md, scope?, owner?, valid_from?, valid_until?, supersedes_id?, review_due_at?, metadata?, visibility?}` |
 | POST | `/kb.inspect_citation` | body: `{source, source_id, claim}` → authorized exact source span |
 | POST | `/kb.delete_doc?id=...` | body: `{reason}` → durable tombstone + projection status |
 | GET  | `/kb.doc_history?id=...` | wiki versions |

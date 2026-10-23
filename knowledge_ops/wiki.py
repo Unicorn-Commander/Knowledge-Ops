@@ -267,7 +267,11 @@ def upsert_documents_atomic(
                     or existing_target["owner"].lower() != doc["owner"].lower()
                 ):
                     raise AuthorizationError("existing document scope and owner are immutable")
-                if existing_target and doc["visibility_explicit"] and (
+                existing_binding = (
+                    existing_target["visibility_workspace_id"]
+                    or existing_target["visibility_project_id"]
+                ) if existing_target else None
+                if existing_binding and doc["visibility_explicit"] and (
                     existing_target["visibility_workspace_id"] != doc["visibility_workspace_id"]
                     or existing_target["visibility_project_id"] != doc["visibility_project_id"]
                 ):
