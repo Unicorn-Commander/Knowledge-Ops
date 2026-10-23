@@ -63,7 +63,7 @@ def test_mapped_verified_client_gets_workspace_and_reads_bound_row(tmp_path, mon
         owner="project-ops",
         visibility={"workspace_id": "magic-unicorn", "project_id": "legal-ops"},
     )
-    principal = _verified_principal(monkeypatch, {"azp": "ko-agent-brigade"})
+    principal = _verified_principal(monkeypatch, {"client_id": "ko-agent-brigade"})
 
     assert principal.workspaces == frozenset({"magic-unicorn"})
     assert principal.projects == frozenset({"legal-ops"})

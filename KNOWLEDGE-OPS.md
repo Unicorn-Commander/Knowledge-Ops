@@ -281,8 +281,8 @@ and the map never applies to anonymous or unverified requests. Malformed JSON
 or an invalid entry fails startup rather than silently granting no mapping.
 For dogfood, the status quo is that the three clients above see the global
 legacy rows while `KNOWLEDGE_OPS_ALLOW_LEGACY_GLOBAL_VISIBILITY=1`; configure
-the map, then run `retag-legacy --workspace magic-unicorn --legal-project
-legal-ops --apply`, and finally unset the legacy visibility flag.
+the map, then run `retag-legacy --workspace magic-unicorn --legal-project legal-ops --apply`,
+and finally unset the legacy visibility flag.
 
 OpenWiki 0.2.0 is pinned as an untrusted producer. Its immutable staging,
 OKF/security gates, and review-before-canonical contract are in
