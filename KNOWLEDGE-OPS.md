@@ -261,6 +261,29 @@ rows are treated as legacy compatibility rows only when
 `KNOWLEDGE_OPS_ALLOW_LEGACY_GLOBAL_VISIBILITY=1`; the default is the safe deny
 behavior for non-admin readers.
 
+### Client-to-workspace mapping for service clients
+
+Some verified service-client tokens identify their caller with `azp` (or the
+fallback claim `client_id`) but carry no workspace claim. Configure the resource
+server with `KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP` as a JSON object whose entries
+contain required `workspaces` and optional `projects` arrays:
+
+```sh
+export KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP='{
+  "ko-agent-brigade": {"workspaces": ["magic-unicorn"]},
+  "ko-agent-claude": {"workspaces": ["magic-unicorn"]},
+  "ko-agent-shafen": {"workspaces": ["magic-unicorn"]}
+}'
+```
+
+The map is a fallback only: an already verified token's workspace claims win,
+and the map never applies to anonymous or unverified requests. Malformed JSON
+or an invalid entry fails startup rather than silently granting no mapping.
+For dogfood, the status quo is that the three clients above see the global
+legacy rows while `KNOWLEDGE_OPS_ALLOW_LEGACY_GLOBAL_VISIBILITY=1`; configure
+the map, then run `retag-legacy --workspace magic-unicorn --legal-project legal-ops --apply`,
+and finally unset the legacy visibility flag.
+
 OpenWiki 0.2.0 is pinned as an untrusted producer. Its immutable staging,
 OKF/security gates, and review-before-canonical contract are in
 `docs/OPENWIKI-GOVERNANCE.md`.

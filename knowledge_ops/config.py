@@ -1,10 +1,48 @@
 from __future__ import annotations
 
-import os
 import json
-from pathlib import Path
+import os
 import socket
+from pathlib import Path
+
 from pydantic import BaseModel, Field
+
+
+def _parse_client_workspace_map() -> dict[str, dict[str, list[str]]]:
+    raw = os.getenv("KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP must be valid JSON "
+            f"(line {exc.lineno}, column {exc.colno})"
+        ) from exc
+    if not isinstance(value, dict):
+        raise TypeError("KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP must be a JSON object")
+
+    parsed: dict[str, dict[str, list[str]]] = {}
+    for client_id, entry in value.items():
+        if not isinstance(client_id, str) or not client_id.strip():
+            raise ValueError("KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP client IDs must be non-empty strings")
+        if not isinstance(entry, dict):
+            raise TypeError("KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP entries must be objects")
+        workspaces = entry.get("workspaces")
+        projects = entry.get("projects", [])
+        if not isinstance(workspaces, list) or not all(isinstance(item, str) and item.strip() for item in workspaces):
+            raise ValueError(
+                "KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP workspaces must be a list of non-empty strings"
+            )
+        if not isinstance(projects, list) or not all(isinstance(item, str) and item.strip() for item in projects):
+            raise ValueError(
+                "KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP projects must be a list of non-empty strings"
+            )
+        parsed[client_id.strip()] = {
+            "workspaces": [item.strip() for item in workspaces],
+            "projects": [item.strip() for item in projects],
+        }
+    return parsed
 
 
 class Settings(BaseModel):
@@ -44,6 +82,7 @@ class Settings(BaseModel):
     api_jwt_leeway: int = int(os.getenv("KNOWLEDGE_OPS_API_JWT_LEEWAY", "60"))
     max_request_bytes: int = int(os.getenv("KNOWLEDGE_OPS_MAX_REQUEST_BYTES", "1048576"))
     rate_limit_per_minute: int = int(os.getenv("KNOWLEDGE_OPS_RATE_LIMIT_PER_MINUTE", "120"))
+    client_workspace_map: dict[str, dict[str, list[str]]] = Field(default_factory=_parse_client_workspace_map)
 
     # The scheduler is an explicitly started, separate process. Adapter names
     # are logical identifiers only; endpoints and credentials never enter the

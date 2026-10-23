@@ -6,12 +6,13 @@ REST and HTTP-MCP turn a cryptographically verified token into the same
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import logging
 import threading
 import time
-from typing import Any, Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -157,6 +158,13 @@ def can_read_visibility(
 
 
 def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Principal:
+    """Build a principal from claims returned by a verified token.
+
+    ``principal_from_authorization`` and ``require_tool_principal`` call the
+    token verifiers before reaching this function. The client map is therefore
+    only consulted on those authenticated paths, never for anonymous/system
+    principals or for an unverified token rejected before this boundary.
+    """
     subject = str(claims.get("sub") or "").strip()
     if not subject:
         raise AuthorizationError("verified token is missing sub")
@@ -193,6 +201,14 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
         claims.get("project_id"), claims.get("project_ids"), claims.get("projects"),
         claims.get("project"),
     )
+    if not workspaces:
+        client_id = str(claims.get("azp") or claims.get("client_id") or "").strip()
+        mapping = settings.client_workspace_map.get(client_id) if client_id else None
+        if mapping:
+            workspaces |= _claim_ids(mapping.get("workspaces"))
+            projects |= _claim_ids(mapping.get("projects"))
+            if workspaces or projects:
+                logger.debug("applied client workspace map entry for client %s", client_id)
     return Principal(
         subject=subject,
         scopes=frozenset(scopes),
