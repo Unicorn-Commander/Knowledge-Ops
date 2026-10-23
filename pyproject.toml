@@ -15,16 +15,17 @@ dependencies = [
   "psycopg[binary]==3.2.9",
   "PyYAML==6.0.3",
   # /mcp Brigade-JWT verification (lazy: only used when KNOWLEDGE_OPS_MCP_REQUIRE_JWT=1)
-  "pyjwt[crypto]==2.13.0",
+  "pyjwt[crypto]==2.15.0",
+  "certifi>=2026.10.19",
 ]
 
 [project.optional-dependencies]
 # MCP stdio runtime (kb.* tools for Brigade / Claude Desktop / Cursor).
-mcp = ["mcp==1.28.1"]
+mcp = ["mcp>=1.30.0,<2"]
 # Live store adapters: Qdrant uses httpx (already a core dep); FalkorDB needs a
 # RedisGraph client. Install with: pip install 'knowledge-ops[live]'
 live = ["redis==5.3.1"]
-all = ["mcp==1.28.1", "redis==5.3.1"]
+all = ["mcp>=1.30.0,<2", "redis==5.3.1"]
 test = ["pytest==9.0.2", "ruff==0.15.13"]
 
 [project.scripts]
