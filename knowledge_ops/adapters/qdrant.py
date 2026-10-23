@@ -20,8 +20,10 @@ async def embed(texts: list[str]) -> list[list[float]]:
 def _visibility_filter(principal: Principal, scope: str | None) -> dict | None:
     principal.require("read:knowledge")
     validate_requested_scope(principal, scope)
-    if principal.is_admin and scope in (None, "", "all"):
-        return None
+    if principal.is_admin:
+        if scope in (None, "", "all"):
+            return None
+        return {"must": [{"key": "scope", "match": {"value": scope}}]}
     def bound_global() -> dict:
         branches: list[dict] = []
         if settings.allow_legacy_global_visibility:

@@ -80,6 +80,7 @@ def _cache_key(principal: Principal, scope: str | None) -> tuple:
         frozenset(principal.identities),
         frozenset(principal.workspaces),
         frozenset(principal.projects),
+        settings.allow_legacy_global_visibility,
     )
 
 
