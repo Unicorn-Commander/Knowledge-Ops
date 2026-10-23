@@ -77,9 +77,11 @@ def test_native_wiki_query_never_selects_another_personal_owner(tmp_path, monkey
     assert {hit.title for hit in hits} == {"Shared", "Alice"}
 
 
-def test_qdrant_filter_is_identity_derived_and_missing_scope_is_not_visible():
+def test_qdrant_filter_is_identity_derived_and_missing_scope_is_not_visible(monkeypatch):
     from knowledge_ops.adapters.qdrant import _visibility_filter
+    import knowledge_ops.config as config
 
+    monkeypatch.setattr(config.settings, "allow_legacy_global_visibility", True)
     alice = Principal(
         "alice-id",
         scopes=frozenset({"read:knowledge"}),

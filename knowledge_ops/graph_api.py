@@ -9,9 +9,8 @@ never silently vanish. Every per-store step degrades to "skip" — an unreachabl
 backend thins the graph, it never 500s.
 
 The full graph response is cached in-process for 10 minutes per visibility
-identity (scope, admin flag, scope-set, identity-set — identities are part of
-the key so two users who share scopes but own different personal records never
-share a cached graph).
+identity (scope, admin flag, scope-set, identity-set, workspace-set, and
+project-set).
 """
 from __future__ import annotations
 
@@ -79,6 +78,8 @@ def _cache_key(principal: Principal, scope: str | None) -> tuple:
         principal.is_admin,
         frozenset(principal.scopes),
         frozenset(principal.identities),
+        frozenset(principal.workspaces),
+        frozenset(principal.projects),
     )
 
 
@@ -548,7 +549,10 @@ async def kb_stats(principal: GraphPrincipal) -> dict:
                 )
 
     try:
-        sources.append({"key": "wiki", "label": "Wiki", "count": len(list_docs()), "kind": "canonical"})
+        sources.append({
+            "key": "wiki", "label": "Wiki", "count": len(list_docs(principal=principal)),
+            "kind": "canonical",
+        })
     except Exception:
         pass
 

@@ -22,8 +22,37 @@ def _visibility_filter(principal: Principal, scope: str | None) -> dict | None:
     validate_requested_scope(principal, scope)
     if principal.is_admin and scope in (None, "", "all"):
         return None
+    def bound_global() -> dict:
+        branches: list[dict] = []
+        if settings.allow_legacy_global_visibility:
+            branches.append({
+                "must": [
+                    {"key": "scope", "match": {"value": "global"}},
+                    {"is_null": {"key": "workspace_id"}},
+                    {"is_null": {"key": "project_id"}},
+                ]
+            })
+        workspaces = sorted(principal.workspaces)
+        if workspaces:
+            project_conditions: list[dict] = [{"is_null": {"key": "project_id"}}]
+            projects = sorted(principal.projects)
+            if projects:
+                project_conditions.append({"key": "project_id", "match": {"any": projects}})
+            branches.append({
+                "must": [
+                    {"key": "scope", "match": {"value": "global"}},
+                    {"key": "workspace_id", "match": {"any": workspaces}},
+                ],
+                "should": project_conditions,
+            })
+        if len(branches) == 1:
+            return branches[0]
+        if branches:
+            return {"should": branches}
+        return {"must": [{"key": "scope", "match": {"value": "__no_visible_global__"}}]}
+
     if scope == "global":
-        return {"must": [{"key": "scope", "match": {"value": "global"}}]}
+        return bound_global()
     owners = sorted(principal.identities)
     personal = {"must": [
         {"key": "scope", "match": {"value": "personal"}},
@@ -33,7 +62,7 @@ def _visibility_filter(principal: Principal, scope: str | None) -> dict | None:
         return personal
     if scope and scope.startswith("workspace:"):
         return {"must": [{"key": "scope", "match": {"value": scope}}]}
-    visible: list[dict] = [{"key": "scope", "match": {"value": "global"}}, personal]
+    visible: list[dict] = [bound_global(), personal]
     if principal.has_scope("read:knowledge:restricted"):
         visible.append({"key": "scope", "match": {"value": "restricted"}})
     return {"should": visible}

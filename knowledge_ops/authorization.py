@@ -186,7 +186,9 @@ def principal_from_claims(claims: dict[str, Any], *, oidc: bool = False) -> Prin
         if value:
             identities.add(value)
     workspace_claim = claims.get("workspace")
-    workspaces = _claim_ids(claims.get("workspace_id"), claims.get("workspaces"), workspace_claim)
+    workspaces = _claim_ids(
+        claims.get("workspace_id"), claims.get("workspace_ids"), claims.get("workspaces"), workspace_claim,
+    )
     projects = _claim_ids(
         claims.get("project_id"), claims.get("project_ids"), claims.get("projects"),
         claims.get("project"),
@@ -397,12 +399,16 @@ def sqlite_visibility_clause(
     if requested_scope and str(requested_scope).startswith("workspace:"):
         return scoped(f"{scope_column}=?", (requested_scope,))
     owners = tuple(sorted(identity.lower() for identity in principal.identities if identity))
+    if requested_scope == "personal":
+        if not owners:
+            return "0=1", ()
+        owner_slots = ",".join("?" for _ in owners)
+        personal = f"({scope_column}=? AND lower({owner_column}) IN ({owner_slots}))"
+        return scoped(personal, ("personal", *owners))
     if not owners:
-        return "0=1", ()
+        return scoped(f"{scope_column}=?", ("global",))
     owner_slots = ",".join("?" for _ in owners)
     personal = f"({scope_column}=? AND lower({owner_column}) IN ({owner_slots}))"
-    if requested_scope == "personal":
-        return scoped(personal, ("personal", *owners))
     global_clause, global_params = scoped(f"{scope_column}=?", ("global",))
     personal_clause, personal_params = scoped(personal, ("personal", *owners))
     return f"({global_clause} OR {personal_clause})", (*global_params, *personal_params)
