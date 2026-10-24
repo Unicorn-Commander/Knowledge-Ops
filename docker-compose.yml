@@ -124,6 +124,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
 
   knowledge-ops:
     build: .
@@ -176,6 +177,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
 
   knowledge-ops-worker:
     profiles: ["worker"]
@@ -208,6 +210,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
 
 volumes:
   knowledge_ops_bootstrap_auth:

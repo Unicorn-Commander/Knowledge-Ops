@@ -17,7 +17,7 @@ COMPOSE = yaml.safe_load(COMPOSE_TEXT)
 def test_readme_quickstart_is_the_two_command_loopback_path():
     match = re.search(
         r"```bash\n"
-        r"(docker compose up -d --build)\n"
+        r"(docker compose up -d --build --wait)\n"
         r"(curl -fsS http://127\.0\.0\.1:8765/ready)\n"
         r"```",
         README,
