@@ -28,7 +28,7 @@ Versioned pages, cited search, and an approval gate before an import becomes can
 
 ## What is Knowledge-Ops?
 
-Knowledge-Ops is the governed evidence layer in the [Unicorn Commander](https://unicorncommander.ai) suite. It keeps canonical documents in a versioned wiki, indexes local files, and returns cited passages over REST and MCP. Agents call `search` and `ground`. An OpenWiki import stays in staging until an administrator approves it. You run the service yourself. By default, every `/kb.*` call requires a verified OIDC or Brigade bearer token and is authorized in the application; explicitly disabling API auth uses a local administrator principal.
+Knowledge-Ops is the governed evidence layer in the [Unicorn Commander](https://unicorncommander.com) suite. It keeps canonical documents in a versioned wiki, indexes local files, and returns cited passages over REST and MCP. Agents call `search` and `ground`. An OpenWiki import stays in staging until an administrator approves it. You run the service yourself. By default, every `/kb.*` call requires a verified OIDC or Brigade bearer token and is authorized in the application; explicitly disabling API auth uses a local administrator principal.
 
 Automated grounding is a lexical heuristic. Each ground response sets `verification_status` to `heuristic_not_verified`.
 
@@ -347,4 +347,4 @@ Every `/kb.*` handler depends on an application principal. `/health` and `/ready
 
 Knowledge-Ops is licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
 
-<p align="center">Built by <a href="https://magicunicorn.tech">Magic Unicorn</a> · part of <a href="https://unicorncommander.ai">Unicorn Commander</a></p>
+<p align="center">Built by <a href="https://magicunicorn.tech">Magic Unicorn</a> · part of <a href="https://unicorncommander.com">Unicorn Commander</a></p>
