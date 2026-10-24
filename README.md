@@ -151,8 +151,10 @@ The browser client sends the session cookie and leaves `Authorization` for a pro
 
 ### See the wiki
 
+`--wait` returns once the containers report healthy. Without it, `up` returns as soon as the API container starts, before it is listening, and the next `curl` fails.
+
 ```bash
-KNOWLEDGE_OPS_API_REQUIRE_AUTH=0 docker compose up -d --build
+KNOWLEDGE_OPS_API_REQUIRE_AUTH=0 docker compose up -d --build --wait
 curl -fsS http://127.0.0.1:8765/ready
 ```
 
@@ -167,7 +169,7 @@ Auth off is for this loopback bind. Put a trusted issuer in place before you pub
 With the default (`KNOWLEDGE_OPS_API_REQUIRE_AUTH=1`), the issuer writes one bootstrap admin token on first start. The signing key, public JWK, and token stay on the `knowledge_ops_bootstrap_auth` volume, mounted only by `knowledge-ops-auth`. The API receives the public JWKS over the compose network. The service does not print the token. It is valid for 90 days, mode `0600`, and a restart keeps it while it still verifies.
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build --wait
 curl -fsS http://127.0.0.1:8765/ready
 ```
 
@@ -201,7 +203,7 @@ The application declares **48 routes**: 40 on the main app, 5 on the graph route
 The optional worker schedules refresh jobs, runs local review scans, and retries local projection cleanup. Enable it when you need that work:
 
 ```bash
-docker compose --profile worker up -d --build
+docker compose --profile worker up -d --build --wait
 ```
 
 External connector refresh and source-owner deletion require explicitly registered adapters with process-owned credentials; the default worker registers none. The worker container runs `knowledge-ops worker`. Its healthcheck is `knowledge-ops worker-health`. Set `KNOWLEDGE_OPS_REQUIRE_WORKER=1` on the API when `/ready` must include a fresh worker heartbeat.
