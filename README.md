@@ -28,19 +28,19 @@ Versioned pages, cited search, and an approval gate before an import becomes can
 
 ## What is Knowledge-Ops?
 
-Knowledge-Ops is the governed evidence layer in the [Unicorn Commander](https://unicorncommander.ai) suite. It keeps canonical documents in a versioned wiki, indexes local files, and returns cited passages over REST and MCP. Agents call `search` and `ground`. An OpenWiki import stays in staging until an administrator approves it. You run the service yourself, and every `/kb.*` call is authorized in the application from a verified OIDC or Brigade bearer token.
+Knowledge-Ops is the governed evidence layer in the [Unicorn Commander](https://unicorncommander.ai) suite. It keeps canonical documents in a versioned wiki, indexes local files, and returns cited passages over REST and MCP. Agents call `search` and `ground`. An OpenWiki import stays in staging until an administrator approves it. You run the service yourself. By default, every `/kb.*` call requires a verified OIDC or Brigade bearer token and is authorized in the application; explicitly disabling API auth uses a local administrator principal.
 
 Automated grounding is a lexical heuristic. Each ground response sets `verification_status` to `heuristic_not_verified`.
 
 ## Highlights
 
-- **Versioned wiki.** Pages have history, `valid_from` / `valid_until`, supersession, and tombstones. `as_of` retrieves the wiki as it stood at an ISO 8601 time, and a tombstone stays out of retrieval, including historical queries. See [Governed Memory Lifecycle](docs/MEMORY-LIFECYCLE.md).
+- **Versioned wiki.** Pages have history, `valid_from` / `valid_until`, supersession, and tombstones. `as_of` selects documents whose validity interval contains an ISO 8601 time, using their latest stored bodies. Tombstoned content stays out of search, including historical queries. See [Governed Memory Lifecycle](docs/MEMORY-LIFECYCLE.md).
 - **Wikilinks.** The library resolves `[[wikilinks]]`, draws backlinks, and lists missing targets and orphans from `GET /kb.links`.
 - **Cited federation.** One query merges the wiki, the file index, a local JSONL memory file when that file is present, and any enabled Qdrant, FalkorDB, `center_deep`, REST, or read-only Postgres source. Disabled adapters return an empty list. When a live adapter raises, that source is dropped and the other hits are still returned.
 - **Heuristic grounding.** `POST /kb.ground` returns a verdict of `possible_support`, `possible_contradiction`, `possible_conflict`, `related_evidence`, or `not_enough_evidence`, plus the passages that produced it.
 - **Citation inspection.** `POST /kb.inspect_citation` returns the authorized source span behind a `wiki` or `file_index` citation.
-- **OpenWiki review.** Bundles are staged, scanned, and promoted only by an administrator. The producer never receives a writable mount of the canonical wiki. See [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md).
-- **Visibility in the app.** Reads and writes are filtered by the verified principal: `personal`, `global`, `workspace:` scopes, and optional workspace or project bindings. `scope=all` is reserved for a knowledge administrator.
+- **OpenWiki review.** Bundles are staged and scanned; promotion requires an administrator. Run the external producer without a writable mount of the canonical wiki. See [OpenWiki Governance](docs/OPENWIKI-GOVERNANCE.md).
+- **Visibility in the app.** Wiki and search reads apply the principal’s identity, `personal`, `global`, or `workspace:<id>` scope, and workspace/project bindings. Wiki writes accept `personal` or `global` scope and require write permissions. Global content without a workspace binding is hidden from non-admins by default. `scope=all` is reserved for a knowledge administrator.
 - **One process, no frontend build.** The Observatory at `/ui/` is static HTML and JavaScript served by FastAPI: Ask, Library, Review, Files, Sources, Graph, Operations, and Help.
 
 ## Feature tour
@@ -55,9 +55,9 @@ Automated grounding is a lexical heuristic. Each ground response sets `verificat
 
 The Library is an encyclopedia view of the wiki: a page tree, the article, and a rail with scope, owner, versions, and backlinks. Create and edit Markdown in the browser, including `[[wikilink]]` completion. `POST /kb.upsert_doc` writes the same pages from an agent. Personal pages belong to the caller. A global write requires `write:knowledge:global`.
 
-`GET /kb.docs` lists what the caller may see. `GET /kb.get_doc` fetches one page. `GET /kb.doc_history` and `GET /kb.doc_version` return prior bodies. `POST /kb.delete_doc` records a reason and tombstones the page. Personal deletion is the owner or an administrator. Global deletion requires a knowledge administrator.
+`GET /kb.docs` lists what the caller may see. `GET /kb.get_doc` fetches one page. `GET /kb.doc_history?id=<doc>` lists saved-version metadata; `GET /kb.doc_version?id=<doc>&version_id=<version>` returns a prior body. `POST /kb.delete_doc` records a reason and tombstones the page. Personal deletion requires the owner with read/write access or an administrator. Global deletion requires a knowledge administrator.
 
-The standalone compose leaves seed ingestion off (`KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS=0`). The Docker build also refuses any `*.md` under `wiki/` unless you pass `--build-arg KNOWLEDGE_OPS_SEED_CORPUS=internal`. Startup then ingests that Markdown only when the runtime flag is `1`.
+The standalone compose leaves seed ingestion off (`KNOWLEDGE_OPS_SEED_INTERNAL_CORPUS=0`). The Docker build also refuses any `*.md` under `wiki/` unless you pass `--build-arg KNOWLEDGE_OPS_SEED_CORPUS=internal`. Startup ingests previously unknown Markdown paths only when the runtime flag is `1`.
 
 ### A page and its sources
 
@@ -67,9 +67,9 @@ The standalone compose leaves seed ingestion off (`KNOWLEDGE_OPS_SEED_INTERNAL_C
   <em>A page with its sources.</em>
 </p>
 
-A page is canonical Markdown in SQLite, with a Markdown projection on disk that startup can rebuild. Around it sit the sources that retrieval actually used: the wiki itself, indexed files, and any live store you have enabled. `GET /kb.list_sources` reports each source as enabled, configured, or disabled. The Sources view in the Observatory is that catalog, plus the MCP tool list.
+A page is canonical Markdown in SQLite, with a Markdown projection on disk that startup can rebuild. Search and grounding responses include passages from the wiki, indexed files, and any configured sources that returned accessible matches. `GET /kb.list_sources` returns an `enabled` flag and a source-specific status, including local storage types, `configured`, `disabled`, or `blocked-missing-auth-contract`. The Sources view combines that catalog, source counts, and the MCP tool list.
 
-`POST /kb.inspect_citation` with `source`, `source_id`, and `claim` returns the authorized span for a wiki or file-index hit, so a passage can be checked against the text it came from. The file index only walks directories under `KNOWLEDGE_OPS_FILE_ROOT`, skips symlinks, skips names that look like secrets, and indexes a fixed set of text suffixes.
+`POST /kb.inspect_citation` with `source`, `source_id`, and `claim` returns the authorized span for a wiki or file-index hit. Revision-bound wiki citations fail after the source changes; legacy file chunks without spans need reindexing. The file index only walks directories under `KNOWLEDGE_OPS_FILE_ROOT`, skips symlinks, skips names that look like secrets, and indexes a fixed set of text suffixes.
 
 ### Search and grounded answers
 
@@ -79,9 +79,9 @@ A page is canonical Markdown in SQLite, with a Markdown projection on disk that 
   <em>Search and grounded answers.</em>
 </p>
 
-Ask has two modes. **Passages** calls `POST /kb.search` and returns the top merged hits. **Assess** calls `POST /kb.ground` and adds the heuristic verdict. Both take `query`, optional `scope` (`global`, `personal`, or `all`), optional `sources`, optional `k` (1–50, default 8), and optional `as_of`. An `as_of` query is wiki-only.
+Ask has two modes. **Passages** calls `POST /kb.search` and returns the top merged hits. **Assess** calls `POST /kb.ground` and adds the heuristic verdict. Both REST endpoints accept `query`, optional `scope` (`global`, `personal`, `workspace:<id>`, or admin-only `all`), optional `sources`, optional `k` (1–50, default 8), and optional `as_of`. Ask sends `query`, `scope`, and `k`; source selection and `as_of` are API options. An `as_of` request defaults to the wiki and rejects other sources.
 
-The answer text is evidence excerpts. It is labeled as a heuristic, and the UI shows the same verdict names the API returns.
+The answer text is evidence excerpts. Assess labels its verdict as heuristic and displays the API verdict names with spaces in place of underscores.
 
 ## Built for agents
 
@@ -91,7 +91,7 @@ Knowledge-Ops exposes MCP over HTTP and over stdio, plus a small chat proxy to U
 
 `POST /mcp` speaks MCP JSON-RPC over HTTP: `initialize`, `ping`, `tools/list`, and `tools/call`. The protocol version string is `2025-06-18`. The tool catalog is the `tools` array in [`.well-known/mcps.json`](.well-known/mcps.json), also served at `GET /.well-known/mcps.json`. That catalog has **16 tools**. The handler dispatches on the last dotted segment, so `search` and `knowledge.search` call the same function.
 
-Every HTTP-MCP method requires a bearer JWT: RS256, audience `KNOWLEDGE_OPS_MCP_AUDIENCE`, issuer in `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS`, signature checked against `KNOWLEDGE_OPS_MCP_JWKS_URL`. `tools/call` then checks the tool's scopes (`read:knowledge` or `write:knowledge`). Setting `KO_MCP_ALLOW_ANONYMOUS_DISCOVERY=true` opens discovery methods only. It never opens `tools/call`. The default is closed.
+By default, every HTTP-MCP method requires a bearer JWT: RS256, audience `KNOWLEDGE_OPS_MCP_AUDIENCE`, issuer in `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS`, signature checked against `KNOWLEDGE_OPS_MCP_JWKS_URL`. `tools/call` then checks the manifest’s required scopes (`read:knowledge` or `write:knowledge`); `whoami` requires authentication but no scope. Setting `KO_MCP_ALLOW_ANONYMOUS_DISCOVERY=true` opens discovery methods only. It never opens `tools/call`. The default is closed.
 
 The standalone compose points that JWKS URL at its own issuer, so the bootstrap admin token below works for `/mcp`.
 
@@ -103,7 +103,7 @@ The standalone compose points that JWKS URL at its own issuer, so the bootstrap 
 | `get_doc`, `list_docs`, `doc_history` | Read the wiki the caller is allowed to see. |
 | `upsert_doc`, `delete_doc` | Write or tombstone a page. |
 | `inspect_citation` | The authorized span behind a wiki or file citation. |
-| `find_file`, `deep_read` | Search the file index, or read one indexed path. |
+| `find_file`, `deep_read` | Search the file index, or retrieve up to `k` stored chunks from one indexed path. |
 | `graph`, `links`, `stats` | The constellation graph, wikilinks, and source counts the UI uses. |
 | `whoami` | The caller's subject, scopes, and admin flag. Same payload as `GET /kb.me`. |
 | `record_metric` | Append a named timeseries point. |
@@ -145,7 +145,7 @@ An HTTP client that can send a header looks like this. Replace the token. Do not
 
 ### Brigade guide
 
-`GET /kb.guide.agents` and `POST /kb.guide.chat` call a [Unicorn Brigade](https://github.com/Unicorn-Commander/Unicorn-Brigade) agent. Both return HTTP 503 (`guide-not-configured`) until `KNOWLEDGE_OPS_BRIGADE_KEY` is set. `GET /kb.guide.info` stays local and reports `configured`. The key is sent upstream as `X-API-Key` and is omitted from the response. The standalone compose leaves the guide unset.
+`GET /kb.guide.agents` lists [Unicorn Brigade](https://github.com/Unicorn-Commander/Unicorn-Brigade) agents; `POST /kb.guide.chat` sends a chat turn to one. After authorization, both return HTTP 503 (`guide-not-configured`) when `KNOWLEDGE_OPS_BRIGADE_KEY` is empty. `GET /kb.guide.info` stays local and reports `configured`. The key is sent upstream as `X-API-Key` and is omitted from the response. The standalone compose leaves the guide unset.
 
 `scripts/register_librarian_agent.sql` is a Brigade registration for a worker called the Librarian, whose prompt tells it to call `knowledge.search` and `knowledge.ground`. `scripts/register_ops_center_catalog.sql` registers the `knowledge_ops_access` entitlement with Ops-Center. Neither script runs on `docker compose up`.
 
@@ -177,11 +177,16 @@ With the default (`KNOWLEDGE_OPS_API_REQUIRE_AUTH=1`), the issuer writes one boo
 ```bash
 docker compose up -d --build
 curl -fsS http://127.0.0.1:8765/ready
+```
+
+Read the generated token into a shell variable and check the caller:
+
+```bash
 ADMIN_TOKEN="$(docker compose run --rm --no-deps --entrypoint cat knowledge-ops-auth /data/bootstrap-auth/bootstrap-admin.token)"
 curl -fsS http://127.0.0.1:8765/kb.me -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-The identity response has `name` `bootstrap-admin` and `is_admin` `true`. Keep the token in the shell or a secret store. The bootstrap token is the self-host credential for this compose file. A deployment past loopback uses its own OIDC or Brigade issuer.
+The identity response has `name` `bootstrap-admin` and `is_admin` `true`. Keep the token in the shell or a secret store. The bootstrap token is the self-host credential for this compose file. This repository does not implement hosted signup or per-agent personal access tokens. A deployment past loopback uses its own OIDC or Brigade issuer.
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:8765/kb.ground \
@@ -201,13 +206,13 @@ The application declares **48 routes**: 40 on the main app, 5 on the graph route
 
 ### Optional worker
 
-Refresh scheduling and the deletion outbox run in a separate process. Enable it when you need that work:
+The optional worker schedules refresh jobs, runs local review scans, and retries local projection cleanup. Enable it when you need that work:
 
 ```bash
 docker compose --profile worker up -d --build
 ```
 
-The worker container runs `knowledge-ops worker`. Its healthcheck is `knowledge-ops worker-health`. Set `KNOWLEDGE_OPS_REQUIRE_WORKER=1` on the API when `/ready` must include a fresh worker heartbeat.
+External connector refresh and source-owner deletion require explicitly registered adapters with process-owned credentials; the default worker registers none. The worker container runs `knowledge-ops worker`. Its healthcheck is `knowledge-ops worker-health`. Set `KNOWLEDGE_OPS_REQUIRE_WORKER=1` on the API when `/ready` must include a fresh worker heartbeat.
 
 A non-Docker unit file is at [`deploy/knowledge-ops.service`](deploy/knowledge-ops.service). It listens on all interfaces, so set the issuer variables before you enable it. The compose file above is the quick start.
 
@@ -232,7 +237,7 @@ python -m uvicorn knowledge_ops.api:app --host 127.0.0.1 --port 8765
 
 `pip install -e '.[all]'` is the shorter install when you do not need the hashed lock. The `all` extra adds MCP and the Redis client used by FalkorDB. Bind stays on `127.0.0.1` while auth is off.
 
-There is no local issuer in this path, so `POST /mcp` returns 401 until you set `KNOWLEDGE_OPS_MCP_JWKS_URL`, `KNOWLEDGE_OPS_MCP_AUDIENCE`, and `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS` to a signer you run. The compose issuer is the short way to get that token.
+This path does not start a local issuer. By default, HTTP-MCP still rejects requests without a valid bearer even when REST auth is off. Configure `KNOWLEDGE_OPS_MCP_JWKS_URL`, `KNOWLEDGE_OPS_MCP_AUDIENCE`, and `KNOWLEDGE_OPS_MCP_TRUSTED_ISSUERS` for a trusted signer and send its token, or use the compose issuer above.
 
 The CLI entry point is `knowledge-ops` (`python -m knowledge_ops.cli`). Useful subcommands include `init`, `search`, `ground`, `upsert-doc`, `index-files`, `evaluate-memory`, `worker`, `worker-health`, `backup`, and `restore-verify`.
 
@@ -240,11 +245,11 @@ The CLI entry point is `knowledge-ops` (`python -m knowledge_ops.cli`). Useful s
 
 ## Configuration
 
-Copy names from [`.env.example`](.env.example) into a host-only `.env`. The table is meaning only. Do not commit filled-in secrets. The API issuer and the MCP issuer must be the signer that minted the bearer you send.
+Copy optional Compose overrides from [`.env.example`](.env.example) into a host-only `.env`. Compose passes only variables wired into its service configuration; other settings need an `environment` or `env_file` override. For source runs, export variables in the process environment. Do not commit filled-in secrets. Each bearer must match the issuer, audience, and JWKS configured for its verifier.
 
 | Variable | Meaning |
 |---|---|
-| `KNOWLEDGE_OPS_DATA` | Data directory (SQLite directory, staging parent). |
+| `KNOWLEDGE_OPS_DATA` | Runtime data directory and default staging parent; set the SQLite path separately with `KNOWLEDGE_OPS_DB`. |
 | `KNOWLEDGE_OPS_DB` | SQLite file path. Canonical store. |
 | `KNOWLEDGE_OPS_WIKI` | Markdown projection directory. |
 | `KNOWLEDGE_OPS_OPENWIKI_STAGING` | Content-addressed staging directory for OpenWiki imports. |
@@ -264,7 +269,7 @@ Copy names from [`.env.example`](.env.example) into a host-only `.env`. The tabl
 
 OIDC role names the app maps are `knowledge-reader`, `knowledge-editor`, and `knowledge-admin`. A Brigade-style token carries scopes directly (`read:knowledge`, `write:knowledge`, `write:knowledge:global`, `admin:knowledge`).
 
-Adapter URLs, the embedding model, the Brigade guide, OpenWiki import roots, the file-index allowlist (`KNOWLEDGE_OPS_FILE_ROOT`), and `KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP` are further settings in [`knowledge_ops/config.py`](knowledge_ops/config.py). Leave them unset on a fresh host. When Qdrant is enabled, the default embedding model is `BAAI/bge-m3` at 1024 dimensions.
+Adapter URLs, the embedding model, the Brigade guide, OpenWiki import roots, the file-index allowlist (`KNOWLEDGE_OPS_FILE_ROOT`), and `KNOWLEDGE_OPS_CLIENT_WORKSPACE_MAP` are further settings in [`knowledge_ops/config.py`](knowledge_ops/config.py). Configure the relevant settings before enabling an integration. The client workspace map supplies workspace/project grants for a verified `azp` or `client_id` only when workspace claims are absent. Qdrant requests `BAAI/bge-m3` by default; vector dimensions come from the embedding endpoint’s response.
 
 Credentials for external adapters belong in a host-only environment file. Backup and restore behavior is specified in [Operations Runbook](docs/OPERATIONS-RUNBOOK.md). The scripts are [`scripts/backup.sh`](scripts/backup.sh) and [`scripts/restore_verify.sh`](scripts/restore_verify.sh).
 
@@ -293,10 +298,10 @@ flowchart LR
 - **Wiki** (`knowledge_ops/wiki.py`, `knowledge_ops/wikilinks.py`). SQLite is canonical. Markdown on disk is a projection.
 - **File index, metrics, citations, OpenWiki, memory quality, operations.** Local SQLite subsystems behind `/kb.*` routes. Schema version is **4**.
 - **Graph** (`knowledge_ops/graph_api.py`). `/kb.graph`, `/kb.links`, `/kb.stats`, `/kb.me`, `/kb.doc_version`.
-- **Guide** (`knowledge_ops/guide_api.py`). Included at startup. Chat and the agent list return HTTP 503 (`guide-not-configured`) until `KNOWLEDGE_OPS_BRIGADE_KEY` is set. `GET /kb.guide.info` stays local and reports `configured: false`.
+- **Guide** (`knowledge_ops/guide_api.py`). Included at startup when the module loads. After authorization, chat and the agent list return HTTP 503 (`guide-not-configured`) when `KNOWLEDGE_OPS_BRIGADE_KEY` is empty. `GET /kb.guide.info` stays local and reports whether the key is configured.
 - **Issuer.** Defined in [`docker-compose.yml`](docker-compose.yml), not in the image command. JWKS at `/.well-known/jwks.json` on port 8766 inside the compose network.
 - **Worker** (`knowledge_ops/worker.py`). Optional compose profile. Durable refresh and deletion retries.
-- **Adapters** (`knowledge_ops/adapters/`). Off unless the matching enable flag is set. REST and Postgres sources also need an authorization contract in their configuration or they stay blocked.
+- **Adapters** (`knowledge_ops/adapters/`). Qdrant, FalkorDB, and `center_deep` default off behind enable flags. Local JSONL memory is read when its configured file exists. REST and Postgres use explicit source configurations and require authorization contracts.
 
 ## Part of Unicorn Commander
 
@@ -315,15 +320,15 @@ flowchart LR
 | [Security-Ops](https://github.com/Unicorn-Commander/Security-Ops) | Authorized security scanning with engagement and attestation gates |
 | [Tax-Planning-Ops](https://github.com/Unicorn-Commander/Tax-Planning-Ops) | Tax plans, scenarios and statutory deadlines |
 | [Brand-Ops](https://github.com/Unicorn-Commander/Brand-Ops) | Brand kits, marks, voices and rules |
-| [Podcast-Ops](https://github.com/Unicorn-Commander/Podcast-Ops) | Episodes, audio QA and publishing |
+| [Podcast-Ops](https://github.com/Unicorn-Commander/Podcast-Ops) | Episode scripts, audio rendering, mixing and review |
 | [UUDA](https://github.com/Unicorn-Commander/UUDA) | The device agent for your fleet |
 | [fleet-map](https://github.com/Unicorn-Commander/fleet-map) | Fleet inventory and topology map |
 
-Knowledge-Ops verifies OIDC tokens and Brigade JWTs on each call, publishes its tool catalog for the Brigade broker, and proxies chat to Brigade agents through `/kb.guide.*` when `KNOWLEDGE_OPS_BRIGADE_KEY` is set. `scripts/register_ops_center_catalog.sql` registers the `knowledge_ops_access` entitlement with Ops-Center.
+With API auth enabled, Knowledge-Ops verifies OIDC or Brigade bearer tokens on `/kb.*` calls. HTTP-MCP uses its separate JWT gate. The app publishes its tool catalog for the Brigade broker and proxies chat through `POST /kb.guide.chat` when `KNOWLEDGE_OPS_BRIGADE_KEY` is set. `scripts/register_ops_center_catalog.sql` registers the `knowledge_ops_access` entitlement with Ops-Center.
 
 ## Development
 
-There is no `main` branch. Integration is `codex/knowledge-openwiki-hardening`. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) installs [`requirements.lock`](requirements.lock), then:
+The documented integration branch is `codex/knowledge-openwiki-hardening`, and CI’s push trigger targets it. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) installs [`requirements.lock`](requirements.lock), then runs these checks:
 
 ```bash
 python -m pip install pytest==9.0.2 ruff==0.15.13
