@@ -21,7 +21,7 @@ Versioned pages, cited search, and an approval gate before an import becomes can
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/wiki.webp" width="1100" alt="The Knowledge-Ops wiki: a page tree, an article, and an infobox of scope, versions, and links">
+  <img src="docs/screenshots/ask.webp" width="1100" alt="Ask the org's knowledge and get a cited answer">
   <br>
   <em>The wiki.</em>
 </p>
@@ -47,12 +47,6 @@ Automated grounding is a lexical heuristic. Each ground response sets `verificat
 
 ### The wiki
 
-<p align="center">
-  <img src="docs/screenshots/wiki.webp" width="1100" alt="The Knowledge-Ops wiki library, with the page tree beside the article">
-  <br>
-  <em>The wiki.</em>
-</p>
-
 The Library is an encyclopedia view of the wiki: a page tree, the article, and a rail with scope, owner, versions, and backlinks. Create and edit Markdown in the browser, including `[[wikilink]]` completion. `POST /kb.upsert_doc` writes the same pages from an agent. Personal pages belong to the caller. A global write requires `write:knowledge:global`.
 
 `GET /kb.docs` lists what the caller may see. `GET /kb.get_doc` fetches one page. `GET /kb.doc_history?id=<doc>` lists saved-version metadata; `GET /kb.doc_version?id=<doc>&version_id=<version>` returns a prior body. `POST /kb.delete_doc` records a reason and tombstones the page. Personal deletion requires the owner with read/write access or an administrator. Global deletion requires a knowledge administrator.
@@ -61,12 +55,6 @@ The standalone compose leaves seed ingestion off (`KNOWLEDGE_OPS_SEED_INTERNAL_C
 
 ### A page and its sources
 
-<p align="center">
-  <img src="docs/screenshots/page.webp" width="1100" alt="A wiki page open beside the sources and passages it was grounded on">
-  <br>
-  <em>A page with its sources.</em>
-</p>
-
 A page is canonical Markdown in SQLite, with a Markdown projection on disk that startup can rebuild. Search and grounding responses include passages from the wiki, indexed files, and any configured sources that returned accessible matches. `GET /kb.list_sources` returns an `enabled` flag and a source-specific status, including local storage types, `configured`, `disabled`, or `blocked-missing-auth-contract`. The Sources view combines that catalog, source counts, and the MCP tool list.
 
 `POST /kb.inspect_citation` with `source`, `source_id`, and `claim` returns the authorized span for a wiki or file-index hit. Revision-bound wiki citations fail after the source changes; legacy file chunks without spans need reindexing. The file index only walks directories under `KNOWLEDGE_OPS_FILE_ROOT`, skips symlinks, skips names that look like secrets, and indexes a fixed set of text suffixes.
@@ -74,7 +62,7 @@ A page is canonical Markdown in SQLite, with a Markdown projection on disk that 
 ### Search and grounded answers
 
 <p align="center">
-  <img src="docs/screenshots/search.webp" width="1100" alt="Search and a grounded answer, with a heuristic verdict and numbered cited passages">
+  <img src="docs/screenshots/ask.webp" width="1100" alt="Ask: grounded answers with cited passages">
   <br>
   <em>Search and grounded answers.</em>
 </p>
@@ -84,6 +72,10 @@ Ask has two modes. **Passages** calls `POST /kb.search` and returns the top merg
 The answer text is evidence excerpts. Assess labels its verdict as heuristic and displays the API verdict names with spaces in place of underscores.
 
 ## Built for agents
+
+<p align="center">
+  <img src="docs/screenshots/mcp-tools.webp" width="880" alt="The knowledge tools Knowledge-Ops registers for agents">
+</p>
 
 Knowledge-Ops exposes MCP over HTTP and over stdio, plus a small chat proxy to Unicorn Brigade.
 
