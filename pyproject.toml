@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "knowledge-ops"
 version = "0.4.0"
 description = "Magic Unicorn governed evidence and memory layer"
-license = "AGPL-3.0-or-later"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.139.2",

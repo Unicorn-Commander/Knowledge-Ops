@@ -8,7 +8,7 @@
 
 Versioned pages, cited search, and an approval gate before an import becomes canonical. Self-hosted. One process serves the UI, the REST API, and MCP.
 
-[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-A78BFA?style=flat-square)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-A78BFA?style=flat-square)](LICENSE)
 [![Version 0.4.0](https://img.shields.io/badge/version-0.4.0-A78BFA?style=flat-square)](pyproject.toml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-4ED3C2?style=flat-square)](pyproject.toml)
 [![FastAPI 0.139.2](https://img.shields.io/badge/FastAPI-0.139.2-4ED3C2?style=flat-square)](pyproject.toml)
@@ -347,6 +347,6 @@ Every `/kb.*` handler depends on an application principal. `/health` and `/ready
 
 ## Licence
 
-Knowledge-Ops is licensed under the GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE).
+Knowledge-Ops is licensed under the [Apache License 2.0](LICENSE). You can use, change and redistribute it, including commercially, under its terms. Our names and logos are covered by [TRADEMARKS.md](TRADEMARKS.md).
 
 <p align="center">Built by <a href="https://magicunicorn.tech">Magic Unicorn</a> · part of <a href="https://unicorncommander.com">Unicorn Commander</a></p>
