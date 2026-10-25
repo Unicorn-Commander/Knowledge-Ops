@@ -132,6 +132,29 @@ def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     assert "prefers-reduced-motion" in css
 
 
+def test_ui_health_pulse_uses_non_json_probe_for_plain_text_ready():
+    api_js = (STATIC / "ui" / "api.js").read_text()
+    shell_js = (STATIC / "ui" / "shell.js").read_text()
+    # /ready is a health response, not an API JSON contract. Keep its probe
+    # on the same credentialed, timed fetch path as the JSON client.
+    assert "async function ping(path)" in api_js
+    assert "credentials: \"same-origin\"" in api_js
+    assert "const TIMEOUT_MS = 30000;" in api_js
+    assert "if (!res.ok) throw new KoErr(res.status);" in api_js
+    assert "  ping," in api_js
+    assert 'await api.ping("/ready");' in shell_js
+    assert 'await api.get("/ready");' not in shell_js
+
+
+def test_review_forbidden_memory_queue_is_quiet_but_failures_still_render():
+    review_js = (STATIC / "ui" / "views" / "review.js").read_text()
+    assert "const memoryZone = section.querySelector(\".rv-zone\");" in review_js
+    assert "if (err && err.status === 403)" in review_js
+    assert "memoryZone.hidden = true;" in review_js
+    # A 5xx or other failure must remain visible through the normal renderer.
+    assert "if (!hideMemoryReviewOnForbidden(e)) ctx.error(memoryList, e);" in review_js
+
+
 def test_info_route(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         body = c.get("/info").json()
