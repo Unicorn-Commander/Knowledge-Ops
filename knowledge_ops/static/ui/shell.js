@@ -135,7 +135,7 @@ async function pulse() {
   const dot = $("#statusDot"), txt = $("#statusText");
   if (!dot || !txt) return;
   try {
-    await api.get("/ready");
+    await api.ping("/ready");
     dot.className = "dot dot--ok";
     txt.textContent = "Live";
   } catch (e) {

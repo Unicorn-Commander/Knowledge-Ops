@@ -21,7 +21,7 @@ function fallbackMessage(status) {
   return `HTTP ${status}`;
 }
 
-async function request(path, opts = {}) {
+async function fetchResponse(path, opts = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res;
@@ -29,11 +29,6 @@ async function request(path, opts = {}) {
     res = await fetch(path, {
       credentials: "same-origin",
       ...opts,
-      headers: {
-        Accept: "application/json",
-        ...(opts.body ? { "Content-Type": "application/json" } : {}),
-        ...(opts.headers || {}),
-      },
       signal: controller.signal,
     });
   } catch (e) {
@@ -44,6 +39,18 @@ async function request(path, opts = {}) {
     throw new KoErr(0, "Network error — the service is unreachable.");
   }
   clearTimeout(timer);
+  return res;
+}
+
+async function request(path, opts = {}) {
+  const res = await fetchResponse(path, {
+    ...opts,
+    headers: {
+      Accept: "application/json",
+      ...(opts.body ? { "Content-Type": "application/json" } : {}),
+      ...(opts.headers || {}),
+    },
+  });
 
   const ct = (res.headers.get("content-type") || "").toLowerCase();
   let body = null;
@@ -77,6 +84,11 @@ async function request(path, opts = {}) {
   return body;
 }
 
+async function ping(path) {
+  const res = await fetchResponse(path);
+  if (!res.ok) throw new KoErr(res.status);
+}
+
 function qs(params) {
   if (!params) return "";
   const u = new URLSearchParams();
@@ -90,4 +102,5 @@ function qs(params) {
 export const api = {
   get: (path, params) => request(path + qs(params)),
   post: (path, body) => request(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  ping,
 };

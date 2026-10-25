@@ -109,8 +109,17 @@ export function init(section, ctx) {
   const list = section.querySelector("#rvList");
   const pane = section.querySelector("#rvPane");
   const memoryList = section.querySelector("#rvMemoryList");
+  const memoryZone = section.querySelector(".rv-zone");
   const countEl = section.querySelector("#rvCount");
   let selectedId = null;
+
+  function hideMemoryReviewOnForbidden(err) {
+    if (err && err.status === 403) {
+      memoryZone.hidden = true;
+      return true;
+    }
+    return false;
+  }
 
   /* ---------- import queue ---------- */
   function markSelected() {
@@ -237,6 +246,7 @@ export function init(section, ctx) {
 
   /* ---------- memory-quality scan ---------- */
   async function loadMemory() {
+    memoryZone.hidden = false;
     memoryList.innerHTML = LOADING;
     try {
       const data = await api.get("/kb.review_items?status=open&limit=200");
@@ -264,9 +274,13 @@ export function init(section, ctx) {
           await api.post(`/kb.review_resolve?id=${encodeURIComponent(button.dataset.id)}`, { note: note.trim() });
           toast("ok", "Review item resolved");
           loadMemory();
-        } catch (e) { toast("err", e.message); }
+        } catch (e) {
+          if (!hideMemoryReviewOnForbidden(e)) toast("err", e.message);
+        }
       }));
-    } catch (e) { ctx.error(memoryList, e); }
+    } catch (e) {
+      if (!hideMemoryReviewOnForbidden(e)) ctx.error(memoryList, e);
+    }
   }
 
   section.querySelector("#rvScanBtn").addEventListener("click", async () => {
@@ -276,7 +290,9 @@ export function init(section, ctx) {
       const result = await api.post("/kb.review_scan", {});
       toast("ok", `${result.detected} findings detected`);
       await loadMemory();
-    } catch (e) { toast("err", e.message); }
+    } catch (e) {
+      if (!hideMemoryReviewOnForbidden(e)) toast("err", e.message);
+    }
     finally { btn.disabled = false; }
   });
 
