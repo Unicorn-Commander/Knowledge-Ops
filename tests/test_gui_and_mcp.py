@@ -86,6 +86,8 @@ def test_static_files_present_on_disk():
     for name in (
         "index.html",
         "landing/index.html",
+        "landing/landing.js",
+        "landing/fonts/fraunces-latin-600.woff2",
         "ui/shell.js",
         "ui/api.js",
         "ui/bus.js",
@@ -130,6 +132,35 @@ def test_ui_has_accessible_navigation_and_no_inline_script_handlers():
     assert "min-height: 44px" in css
     assert ":focus-visible" in css
     assert "prefers-reduced-motion" in css
+
+
+def test_landing_runs_under_its_own_csp():
+    # The app sends script-src 'self' and no font-src (so default-src 'self'):
+    # an inline script or a data: font on the landing page is blocked in the browser.
+    html = (STATIC / "landing" / "index.html").read_text()
+    assert html.count("<script") == 1
+    assert '<script src="/landing/landing.js"></script>' in html
+    assert "data:font" not in html
+    assert 'url("/landing/fonts/fraunces-latin-600.woff2")' in html
+    assert "onclick=" not in html
+    # /landing is the public skip-auth route, so it carries its own copy of the UI font.
+    landing_font = STATIC / "landing" / "fonts" / "fraunces-latin-600.woff2"
+    assert landing_font.read_bytes() == (STATIC / "ui" / "fonts" / "fraunces-latin-600.woff2").read_bytes()
+
+
+def test_static_ui_files_revalidate_and_landing_assets_serve(tmp_path, monkeypatch):
+    with _client(tmp_path, monkeypatch) as c:
+        shell = c.get("/ui/ui/shell.js")
+        assert shell.status_code == 200
+        assert shell.headers["cache-control"] == "no-cache"
+        assert c.get("/ui/ui/shell.js", headers={"If-None-Match": shell.headers["etag"]}).status_code == 304
+        script = c.get("/landing/landing.js")
+        assert script.status_code == 200 and "javascript" in script.headers["content-type"]
+        assert script.headers["cache-control"] == "no-cache"
+        font = c.get("/landing/fonts/fraunces-latin-600.woff2")
+        assert font.status_code == 200 and font.content[:4] == b"wOF2"
+        assert c.get("/landing/").headers["cache-control"] == "no-cache"
+        assert "cache-control" not in c.get("/health").headers
 
 
 def test_ui_health_pulse_uses_non_json_probe_for_plain_text_ready():

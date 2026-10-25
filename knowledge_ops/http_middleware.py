@@ -15,6 +15,11 @@ _SECURITY_HEADERS = [
     (b"content-security-policy", b"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"),
 ]
 
+# Static UI files carry an ETag but no Cache-Control, so browsers cached them heuristically
+# and kept running a replaced shell.js for hours after a deploy. Revalidate on every load;
+# an unchanged file costs a 304.
+_REVALIDATE_PREFIXES = ("/ui/", "/landing/")
+
 
 class RequestGuardMiddleware:
     """Bound request bodies and apply a small in-process per-client rate limit."""
@@ -95,6 +100,10 @@ class RequestGuardMiddleware:
             if message.get("type") == "http.response.start":
                 response_headers = list(message.get("headers") or [])
                 response_headers.extend(_SECURITY_HEADERS)
+                if path.startswith(_REVALIDATE_PREFIXES) and not any(
+                    name.lower() == b"cache-control" for name, _ in response_headers
+                ):
+                    response_headers.append((b"cache-control", b"no-cache"))
                 message["headers"] = response_headers
             await send(message)
 
