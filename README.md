@@ -26,6 +26,13 @@ Versioned pages, cited search, and an approval gate before an import becomes can
   <em>The wiki.</em>
 </p>
 
+## Watch the demo
+
+<p align="center">
+  <a href="https://unicorncommander.com/products/knowledge-ops"><img src="https://unicorncommander.com/media/products/knowledge-ops/demo-poster.jpg" width="100%" alt="Knowledge-Ops demo video: click to watch on the product page"></a>
+</p>
+<p align="center"><sub>A 63-second preview filmed on a labelled simulation: the interface is real, the company and the answers are invented. Narrated in a machine voice rendered on our own hardware. <a href="https://unicorncommander.com/products/knowledge-ops">Watch it on the product page</a>.</sub></p>
+
 ## What is Knowledge-Ops?
 
 Knowledge-Ops is the governed evidence layer in the [Unicorn Commander](https://unicorncommander.com) suite. It keeps canonical documents in a versioned wiki, indexes local files, and returns cited passages over REST and MCP. Agents call `search` and `ground`. An OpenWiki import stays in staging until an administrator approves it. You run the service yourself. By default, every `/kb.*` call requires a verified OIDC or Brigade bearer token and is authorized in the application; explicitly disabling API auth uses a local administrator principal.
