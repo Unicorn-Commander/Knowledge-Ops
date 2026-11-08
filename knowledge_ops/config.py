@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import socket
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+
+def cdr_webhook_key(secret: str | None) -> bytes | None:
+    """Return the exact key used by Center Deep's Standard Webhooks signer.
+
+    ``whsec_`` values are standard (not URL-safe) base64.  Invalid values are
+    rejected rather than falling back to the literal prefixed string: that
+    fallback would make a typo silently create a different signing key.
+    Raw secrets remain supported for operators that deliberately configure one.
+    """
+    value = str(secret or "").strip()
+    if not value:
+        return None
+    if value.startswith("whsec_"):
+        encoded = value[len("whsec_"):]
+        if not encoded:
+            return None
+        try:
+            key = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            return None
+    else:
+        key = value.encode("utf-8")
+    return key if len(key) >= 24 else None
 
 
 def _parse_client_workspace_map() -> dict[str, dict[str, list[str]]]:

@@ -259,6 +259,85 @@ def _migrate_v4(db: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_center_deep_tables(db: sqlite3.Connection) -> None:
+    """Create the receiver's durable state without changing the public schema version.
+
+    The Knowledge-Ops migration contract is already consumed by deployments and
+    backup tests.  These tables are therefore additive and idempotent: old
+    databases get them on the next normal ``init_db`` call while the existing
+    schema version remains stable.
+    """
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS center_deep_inventory_state (
+          host_key TEXT NOT NULL,
+          package_key TEXT NOT NULL,
+          ecosystem_key TEXT NOT NULL,
+          host TEXT NOT NULL,
+          package TEXT NOT NULL,
+          ecosystem TEXT NOT NULL,
+          kev_version TEXT NOT NULL DEFAULT '',
+          kev_advisories TEXT NOT NULL DEFAULT '0',
+          kev_complete INTEGER NOT NULL DEFAULT 0,
+          kev_partial INTEGER NOT NULL DEFAULT 0,
+          kev_run_id TEXT NOT NULL DEFAULT '',
+          kev_report_url TEXT NOT NULL DEFAULT '',
+          kev_observed_at TEXT NOT NULL DEFAULT '',
+          release_version TEXT NOT NULL DEFAULT '',
+          release_repo TEXT NOT NULL DEFAULT '',
+          release_latest TEXT NOT NULL DEFAULT '',
+          release_behind TEXT NOT NULL DEFAULT '',
+          release_security_newer TEXT NOT NULL DEFAULT '',
+          release_notes TEXT NOT NULL DEFAULT '',
+          release_complete INTEGER NOT NULL DEFAULT 0,
+          release_partial INTEGER NOT NULL DEFAULT 0,
+          release_run_id TEXT NOT NULL DEFAULT '',
+          release_report_url TEXT NOT NULL DEFAULT '',
+          release_observed_at TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(host_key, package_key, ecosystem_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_center_deep_inventory_host
+          ON center_deep_inventory_state(host_key, package_key);
+
+        CREATE TABLE IF NOT EXISTS center_deep_feed_state (
+          feed TEXT PRIMARY KEY,
+          state TEXT NOT NULL DEFAULT '',
+          observed_at TEXT NOT NULL DEFAULT '',
+          run_id TEXT NOT NULL DEFAULT '',
+          report_url TEXT NOT NULL DEFAULT '',
+          complete INTEGER NOT NULL DEFAULT 0,
+          truncated INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS center_deep_receiver_health (
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          last_error TEXT,
+          last_error_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS center_deep_webhook_receipts (
+          webhook_id TEXT PRIMARY KEY,
+          run_id TEXT UNIQUE,
+          received_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'reserved',
+          error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_center_deep_receipts_received_at
+          ON center_deep_webhook_receipts(received_at);
+        """
+    )
+    _add_column(db, "center_deep_webhook_receipts", "error TEXT")
+    db.execute(
+        "UPDATE center_deep_webhook_receipts SET status='reserved' WHERE status='processing'"
+    )
+    db.execute(
+        "UPDATE center_deep_webhook_receipts SET status='done' WHERE status='completed'"
+    )
+
+
 def connect() -> sqlite3.Connection:
     settings.ensure_dirs()
     database_path = settings.db_path.expanduser()
@@ -403,6 +482,7 @@ def init_db() -> None:
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                     (4, now()),
                 )
+            _ensure_center_deep_tables(db)
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
