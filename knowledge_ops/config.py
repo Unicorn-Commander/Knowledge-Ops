@@ -128,6 +128,16 @@ class Settings(BaseModel):
     embed_dims: int = int(os.getenv("KNOWLEDGE_OPS_EMBED_DIMS", "1024"))
     center_deep_url: str = os.getenv("KNOWLEDGE_OPS_CENTER_DEEP_URL", "http://127.0.0.1:8080")
 
+    # Center Deep's signed delivery receiver is independent of the read-only
+    # catalogue adapter above. An empty secret means the receiver is absent.
+    cdr_webhook_secret: str = os.getenv("KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET", "")
+    cdr_doc_path: str = os.getenv(
+        "KNOWLEDGE_OPS_CDR_DOC_PATH", "ops/self-hosted-stack-versions.md"
+    )
+    cdr_log_path: str = os.getenv(
+        "KNOWLEDGE_OPS_CDR_LOG_PATH", "ops/self-hosted-stack-releases-log.md"
+    )
+
     # FalkorDB (graph) — read-only. Backing store on bigboy: unicorn-falkordb:6379.
     falkordb_url: str = os.getenv("KNOWLEDGE_OPS_FALKORDB_URL", "redis://unicorn-falkordb:6379")
     falkordb_graph: str = os.getenv("KNOWLEDGE_OPS_FALKORDB_GRAPH", "brigade_global")

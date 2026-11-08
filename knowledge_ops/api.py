@@ -25,6 +25,7 @@ from .config import settings
 from .citations import inspect_citation
 from .file_index import deep_read, find_file, index_root
 from .http_middleware import RequestGuardMiddleware
+from .ingest_center_deep import handle_center_deep_ingest
 from .metrics import metric_rows, prometheus_metrics, record_metric, render_metric_chart
 from .memory_quality import (
     complete_refresh_run,
@@ -357,6 +358,12 @@ async def kb_ground(req: SearchRequest, principal: ApiPrincipal) -> dict:
         req.query, scope=req.scope, k=req.k, principal=principal,
         sources=req.sources, as_of=req.as_of,
     )
+
+
+@app.post("/kb.ingest.center_deep")
+async def kb_ingest_center_deep(request: Request) -> Response:
+    """Receive a signed Center Deep delivery without OIDC authentication."""
+    return await handle_center_deep_ingest(request)
 
 
 @app.get("/kb.list_sources")
