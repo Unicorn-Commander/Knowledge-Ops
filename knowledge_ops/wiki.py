@@ -429,6 +429,10 @@ def publish_receiver_doc(
                         "UPDATE wiki_docs SET path=? WHERE id=?",
                         (archive_path, existing["id"]),
                     )
+                    db.execute(
+                        "UPDATE deletion_events SET path=? WHERE doc_id=? AND path=?",
+                        (archive_path, existing["id"], canonical_path),
+                    )
             replacement_id = stable_id(
                 f"wiki-replacement:{canonical_path}:{existing['id']}:{now()}"
             )

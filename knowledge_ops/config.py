@@ -26,7 +26,9 @@ def cdr_webhook_key(secret: str | None) -> bytes | None:
         if not encoded:
             return None
         try:
-            key = base64.b64decode(encoded, validate=True)
+            # Match Center Deep's ``base64.b64decode`` behavior for standard
+            # base64 while still rejecting values that decode to a short key.
+            key = base64.b64decode(encoded)
         except (ValueError, binascii.Error):
             return None
     else:

@@ -318,9 +318,11 @@ def _inventory_components(value: Any) -> list[dict[str, str]]:
 def _matches_component(item: dict[str, Any], component: dict[str, str]) -> bool:
     package = _text(item.get("package"))
     host = _text(item.get("host"))
+    ecosystem = _text(item.get("ecosystem"))
     package_match = not package or package.casefold() == component["package"].casefold()
     host_match = not host or host.casefold() == component["host"].casefold()
-    return package_match and host_match
+    ecosystem_match = not ecosystem or ecosystem.casefold() == component["ecosystem"].casefold()
+    return package_match and host_match and ecosystem_match
 
 
 def _release_date(value: Any, fallback: str) -> str:
@@ -642,7 +644,8 @@ def _render_versions_doc(
 
     def partial(row: dict[str, Any], feed_name: str) -> bool:
         marker = bool(row[f"{feed_name}_partial"])
-        state = feed_states.get(feed_name)
+        state_name = "github_releases" if feed_name == "release" else feed_name
+        state = feed_states.get(state_name)
         return marker or bool(state and (not state["complete"] or state["truncated"]))
 
     rendered_rows: list[str] = []
@@ -703,7 +706,10 @@ def _log_key(line: str) -> tuple[str, str] | None:
     match = _LOG_LINE_RE.match(line.strip())
     if not match:
         return None
-    return match.group(1), match.group(2)
+    return (
+        _unmarkdown_cell(match.group(1)).replace("\\\\", "\\"),
+        _unmarkdown_cell(match.group(2)).replace("\\\\", "\\"),
+    )
 
 
 def _release_log_body(previous_body: str, releases: list[dict[str, Any]], observed_at: str) -> str:
