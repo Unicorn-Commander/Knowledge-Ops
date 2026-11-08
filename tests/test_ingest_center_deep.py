@@ -213,7 +213,7 @@ def test_bad_signature_stale_delivery_and_unset_secret(tmp_path, monkeypatch):
         assert _post_signed(client, body, "webhook-disabled").status_code == 404
 
 
-@pytest.mark.parametrize("secret", ["fictional-raw-secret", SECRET])
+@pytest.mark.parametrize("secret", ["fictional-raw-secret-123", SECRET])
 def test_signature_accepts_raw_and_whsec_key_derivations(tmp_path, monkeypatch, secret):
     _settings(tmp_path, monkeypatch)
     import knowledge_ops.config as config
