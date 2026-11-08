@@ -107,8 +107,18 @@ review deadline, and one sorted row per inventory component. A
 delivery updates advisory counts and CVE IDs while preserving the other
 columns. Release entries are also appended, deduplicated by repository and
 tag, to `ops/self-hosted-stack-releases-log.md` (the log retains 500 lines).
-Both documents are global wiki content and are available to agents through
-`kb.search` and `kb.ground`.
+The merge state is kept in SQLite, keyed by host, package, and ecosystem; the
+Markdown page is only its rendered projection. A partial or truncated delivery
+preserves the last values and renders the affected feed columns as
+`unknown (partial)`. A complete KEV inventory is the only delivery that removes
+components omitted from the canonical state. Each row retains its release and
+KEV source run links.
+
+Both documents are global wiki content bound to the internal `magic-unicorn`
+workspace. Non-admin agents need that workspace in their verified principal to
+read the pages through `kb.search` and `kb.ground`; `/ready` reports the
+receiver status as `disabled`, `ready`, or `misconfigured` and includes its
+last sanitized processing error.
 
 The receiver authenticates only the Standard Webhooks headers from Center
 Deep; it does not use OIDC. Set `KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET` to the same
@@ -213,6 +223,12 @@ The read-only catalogue adapter and the signed delivery receiver are separate:
 | `KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET` | Shared Standard Webhooks secret; empty disables `POST /kb.ingest.center_deep`. |
 | `KNOWLEDGE_OPS_CDR_DOC_PATH` | Canonical versions page; default `ops/self-hosted-stack-versions.md`. |
 | `KNOWLEDGE_OPS_CDR_LOG_PATH` | Release log; default `ops/self-hosted-stack-releases-log.md`. |
+
+The receiver strips the configured secret, accepts a standard padded `whsec_`
+base64 key or a raw UTF-8 key, and requires at least 24 decoded bytes. A
+whitespace-only, malformed, URL-safe, or unpadded `whsec_` value leaves the
+route absent and marks `/ready` as misconfigured. Keep the document and log
+paths distinct; they are canonicalized to `.md` before reads and writes.
 
 From a laptop you can reach the published ports over Tailscale (Qdrant `:6333`,
 Infinity `:8086`, FalkorDB `:6380`), but in production this should run **on bigboy**
