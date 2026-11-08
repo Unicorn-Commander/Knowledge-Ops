@@ -77,6 +77,7 @@ Routes are **dot-style** (`/kb.<tool>`), mirroring the MCP tool names. There is 
 | POST | `/kb.record_metric` | body: `{name, value, tags?}` |
 | GET  | `/kb.get_metric_chart?name=...` | SVG chart |
 | GET  | `/kb.metrics?name=...` | metric rows |
+| POST | `/kb.ingest.center_deep` | Standard Webhooks-signed Center Deep delivery; no OIDC principal |
 | POST | `/kb.index_files?root=...&limit=...` | index a directory tree |
 | GET  | `/kb.find_file?query=...&k=...&scope=...` | file search |
 | GET  | `/kb.deep_read?path=...&query=...` | all chunks of one file |
@@ -95,6 +96,28 @@ curl -s -X POST http://127.0.0.1:8765/kb.ground \
 #     "answer":"Evidence excerpts (not a generated factual conclusion): ...",
 #     "passages":[ ... claim-linked Passage objects ... ]}
 ```
+
+## Center Deep → Knowledge-Ops
+
+Center Deep writes the canonical global page at
+`ops/self-hosted-stack-versions.md` through `POST /kb.ingest.center_deep`.
+The page is owned by `center-deep`, includes the observed state, run link,
+review deadline, and one sorted row per inventory component. A
+`github_releases` delivery updates release/comparison columns; a `kev`
+delivery updates advisory counts and CVE IDs while preserving the other
+columns. Release entries are also appended, deduplicated by repository and
+tag, to `ops/self-hosted-stack-releases-log.md` (the log retains 500 lines).
+Both documents are global wiki content and are available to agents through
+`kb.search` and `kb.ground`.
+
+The receiver authenticates only the Standard Webhooks headers from Center
+Deep; it does not use OIDC. Set `KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET` to the same
+value configured on the delivery target. To rotate it, configure the new
+secret on Center Deep and Knowledge-Ops during a coordinated maintenance
+window, restart/reload Knowledge-Ops, send a signed test delivery, then retire
+the old secret at Center Deep. An empty secret leaves the receiver absent
+(404). Recent `webhook-id` and `data.run_id` values are retained for 24 hours
+so retries are acknowledged without rewriting the pages.
 
 ## Web GUI
 
@@ -180,6 +203,16 @@ and **never crash** if a store is unreachable (they degrade to empty results).
   (`KNOWLEDGE_OPS_FALKORDB_GRAPH`), matching `Entity` nodes by name. Needs `redis>=5`
   (`pip install '.[live]'`).
 - Center Deep stays gated behind `KNOWLEDGE_OPS_ENABLE_CENTER_DEEP=1`.
+
+The read-only catalogue adapter and the signed delivery receiver are separate:
+
+| Setting | Purpose |
+|---|---|
+| `KNOWLEDGE_OPS_CENTER_DEEP_URL` | Base URL for the read-only Center Deep catalogue adapter. |
+| `KNOWLEDGE_OPS_ENABLE_CENTER_DEEP` | `1` enables catalogue queries; it is not required for webhook ingestion. |
+| `KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET` | Shared Standard Webhooks secret; empty disables `POST /kb.ingest.center_deep`. |
+| `KNOWLEDGE_OPS_CDR_DOC_PATH` | Canonical versions page; default `ops/self-hosted-stack-versions.md`. |
+| `KNOWLEDGE_OPS_CDR_LOG_PATH` | Release log; default `ops/self-hosted-stack-releases-log.md`. |
 
 From a laptop you can reach the published ports over Tailscale (Qdrant `:6333`,
 Infinity `:8086`, FalkorDB `:6380`), but in production this should run **on bigboy**
