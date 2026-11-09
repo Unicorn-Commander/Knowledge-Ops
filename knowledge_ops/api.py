@@ -25,6 +25,11 @@ from .config import settings
 from .citations import inspect_citation
 from .file_index import deep_read, find_file, index_root
 from .http_middleware import RequestGuardMiddleware
+from .ingest_center_deep import (
+    cdr_receiver_last_error,
+    cdr_receiver_status,
+    handle_center_deep_ingest,
+)
 from .metrics import metric_rows, prometheus_metrics, record_metric, render_metric_chart
 from .memory_quality import (
     complete_refresh_run,
@@ -77,6 +82,9 @@ async def lifespan(app: FastAPI):
     # wiki from any markdown shipped in wiki_dir so grounding works on a fresh volume.
     settings.ensure_dirs()
     init_db()
+    receiver_status, receiver_reason = cdr_receiver_status()
+    if receiver_status == "misconfigured":
+        logger.error("center-deep receiver disabled code=%s", receiver_reason)
     try:
         seeded = seed_wiki_from_disk()
         if seeded:
@@ -306,11 +314,13 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> JSONResponse:
+    receiver_status, receiver_reason = cdr_receiver_status()
     checks = {
         "database": False,
         "schema": False,
         "wiki": settings.wiki_dir.is_dir(),
         "staging": settings.openwiki_staging_dir.is_dir(),
+        "cdr_receiver": receiver_status,
     }
     worker = worker_readiness()
     try:
@@ -325,9 +335,16 @@ def ready() -> JSONResponse:
             sanitize_error(exc, category="readiness_database_failed"),
         )
     checks["worker"] = worker["ready"] if worker["required"] else True
-    ok = all(checks.values())
+    ok = all(value is True for key, value in checks.items() if key != "cdr_receiver") and receiver_status != "misconfigured"
+    receiver_error = receiver_reason if receiver_status == "misconfigured" else cdr_receiver_last_error()
     return JSONResponse(
-        {"ok": ok, "service": "knowledge-ops", "checks": checks, "worker": worker},
+        {
+            "ok": ok,
+            "service": "knowledge-ops",
+            "checks": checks,
+            "worker": worker,
+            "cdr_receiver": {"status": receiver_status, "last_error": receiver_error},
+        },
         status_code=200 if ok else 503,
     )
 
@@ -357,6 +374,12 @@ async def kb_ground(req: SearchRequest, principal: ApiPrincipal) -> dict:
         req.query, scope=req.scope, k=req.k, principal=principal,
         sources=req.sources, as_of=req.as_of,
     )
+
+
+@app.post("/kb.ingest.center_deep")
+async def kb_ingest_center_deep(request: Request) -> Response:
+    """Receive a signed Center Deep delivery without OIDC authentication."""
+    return await handle_center_deep_ingest(request)
 
 
 @app.get("/kb.list_sources")

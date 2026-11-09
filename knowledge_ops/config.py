@@ -1,11 +1,39 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import socket
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+
+
+def cdr_webhook_key(secret: str | None) -> bytes | None:
+    """Return the exact key used by Center Deep's Standard Webhooks signer.
+
+    ``whsec_`` values are standard (not URL-safe) base64.  Invalid values are
+    rejected rather than falling back to the literal prefixed string: that
+    fallback would make a typo silently create a different signing key.
+    Raw secrets remain supported for operators that deliberately configure one.
+    """
+    value = str(secret or "").strip()
+    if not value:
+        return None
+    if value.startswith("whsec_"):
+        encoded = value[len("whsec_"):]
+        if not encoded:
+            return None
+        try:
+            # Match Center Deep's ``base64.b64decode`` behavior for standard
+            # base64 while still rejecting values that decode to a short key.
+            key = base64.b64decode(encoded)
+        except (ValueError, binascii.Error):
+            return None
+    else:
+        key = value.encode("utf-8")
+    return key if len(key) >= 24 else None
 
 
 def _parse_client_workspace_map() -> dict[str, dict[str, list[str]]]:
@@ -127,6 +155,16 @@ class Settings(BaseModel):
     embed_model: str = os.getenv("KNOWLEDGE_OPS_EMBED_MODEL", "BAAI/bge-m3")
     embed_dims: int = int(os.getenv("KNOWLEDGE_OPS_EMBED_DIMS", "1024"))
     center_deep_url: str = os.getenv("KNOWLEDGE_OPS_CENTER_DEEP_URL", "http://127.0.0.1:8080")
+
+    # Center Deep's signed delivery receiver is independent of the read-only
+    # catalogue adapter above. An empty secret means the receiver is absent.
+    cdr_webhook_secret: str = os.getenv("KNOWLEDGE_OPS_CDR_WEBHOOK_SECRET", "")
+    cdr_doc_path: str = os.getenv(
+        "KNOWLEDGE_OPS_CDR_DOC_PATH", "ops/self-hosted-stack-versions.md"
+    )
+    cdr_log_path: str = os.getenv(
+        "KNOWLEDGE_OPS_CDR_LOG_PATH", "ops/self-hosted-stack-releases-log.md"
+    )
 
     # FalkorDB (graph) — read-only. Backing store on bigboy: unicorn-falkordb:6379.
     falkordb_url: str = os.getenv("KNOWLEDGE_OPS_FALKORDB_URL", "redis://unicorn-falkordb:6379")

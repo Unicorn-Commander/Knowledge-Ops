@@ -92,6 +92,7 @@ def _validated_doc(
     review_due_at: str | None = None,
     metadata: dict | None = None,
     visibility: dict | None = None,
+    document_id: str | None = None,
 ) -> dict:
     rel, disk_path = safe_wiki_path(path)
     if scope not in {"global", "personal"}:
@@ -112,7 +113,7 @@ def _validated_doc(
         "scope": scope,
         "owner": owner,
         "title": title,
-        "id": _doc_id(rel),
+        "id": document_id or _doc_id(rel),
         "valid_from": normalized_from,
         "valid_until": normalized_until,
         "supersedes_id": supersedes_id.strip() if supersedes_id else None,
@@ -237,6 +238,7 @@ def upsert_documents_atomic(
                     **(item.get("metadata") if isinstance(item.get("metadata"), dict) else {}),
                 },
                 visibility=item.get("visibility"),
+                document_id=item.get("document_id"),
             )
             doc["valid_from_explicit"] = bool(item.get("valid_from"))
             doc["valid_until_explicit"] = bool(item.get("valid_until"))
@@ -373,13 +375,86 @@ def upsert_doc(
     review_due_at: str | None = None,
     metadata: dict | None = None,
     visibility: dict | None = None,
+    document_id: str | None = None,
 ) -> str:
     return upsert_documents_atomic([{
         "path": path, "md": md, "scope": scope, "owner": owner,
         "valid_from": valid_from, "valid_until": valid_until,
         "supersedes_id": supersedes_id, "review_due_at": review_due_at,
         "metadata": metadata, "visibility": visibility,
+        "document_id": document_id,
     }])[0]
+
+
+def publish_receiver_doc(
+    path: str,
+    md: str,
+    *,
+    scope: str,
+    owner: str,
+    review_due_at: str | None = None,
+    visibility: dict | None = None,
+) -> str:
+    """Publish a trusted receiver projection while respecting document ownership.
+
+    Receiver-owned active documents use the normal revision path.  A tombstone
+    is immutable in the general wiki API, so a later trusted delivery archives
+    that tombstoned row under a non-canonical history path and publishes a new
+    document at the configured canonical path.  A document owned by another
+    principal is never replaced.
+    """
+    canonical_path, _ = safe_wiki_path(path)
+    init_db()
+    with connect() as db:
+        existing = db.execute(
+            "SELECT id, scope, owner, lifecycle_state FROM wiki_docs WHERE path=?",
+            (canonical_path,),
+        ).fetchone()
+    if existing:
+        if existing["scope"] != scope or existing["owner"].casefold() != owner.casefold():
+            raise AuthorizationError("existing document is owned by another principal")
+        if existing["lifecycle_state"] == "tombstoned":
+            tombstone_path = Path(canonical_path)
+            archive_path = tombstone_path.with_name(
+                f"{tombstone_path.stem}.tombstoned-{str(existing['id'])[:16]}.md"
+            ).as_posix()
+            with connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT lifecycle_state FROM wiki_docs WHERE id=?",
+                    (existing["id"],),
+                ).fetchone()
+                if current and current["lifecycle_state"] == "tombstoned":
+                    db.execute(
+                        "UPDATE wiki_docs SET path=? WHERE id=?",
+                        (archive_path, existing["id"]),
+                    )
+                    db.execute(
+                        "UPDATE deletion_events SET path=? WHERE doc_id=? AND path=?",
+                        (archive_path, existing["id"], canonical_path),
+                    )
+            replacement_id = stable_id(
+                f"wiki-replacement:{canonical_path}:{existing['id']}:{now()}"
+            )
+            return upsert_doc(
+                canonical_path,
+                md,
+                scope=scope,
+                owner=owner,
+                review_due_at=review_due_at,
+                visibility=visibility,
+                document_id=replacement_id,
+            )
+        elif existing["lifecycle_state"] != "active":
+            raise ValueError("receiver document is not active")
+    return upsert_doc(
+        canonical_path,
+        md,
+        scope=scope,
+        owner=owner,
+        review_due_at=review_due_at,
+        visibility=visibility,
+    )
 
 
 def ingest_marketing_docs() -> list[str]:
