@@ -277,7 +277,7 @@ def _ensure_center_deep_tables(db: sqlite3.Connection) -> None:
           package TEXT NOT NULL,
           ecosystem TEXT NOT NULL,
           kev_version TEXT NOT NULL DEFAULT '',
-          kev_advisories TEXT NOT NULL DEFAULT '0',
+          kev_advisories TEXT NOT NULL DEFAULT '',
           kev_complete INTEGER NOT NULL DEFAULT 0,
           kev_partial INTEGER NOT NULL DEFAULT 0,
           kev_run_id TEXT NOT NULL DEFAULT '',

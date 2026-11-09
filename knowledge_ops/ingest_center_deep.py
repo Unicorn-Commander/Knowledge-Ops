@@ -472,16 +472,18 @@ def _mark_partial(
     observed_at: str,
     updated_at: str,
 ) -> None:
+    # A partial run cannot confirm or clear anything. Keep the last complete values AND the link to the run that
+    # produced them (the page header carries the latest run); only a row with no source run yet takes this one.
     prefix = "kev" if feed == "kev" else "release"
     db.execute(
         f"""UPDATE {_INVENTORY_TABLE} SET
               {prefix}_complete=0,
               {prefix}_partial=1,
-              {prefix}_run_id=CASE WHEN ? <> '' THEN ? ELSE {prefix}_run_id END,
-              {prefix}_report_url=CASE WHEN ? <> '' THEN ? ELSE {prefix}_report_url END,
-              {prefix}_observed_at=?,
+              {prefix}_run_id=CASE WHEN COALESCE({prefix}_run_id, '') = '' THEN ? ELSE {prefix}_run_id END,
+              {prefix}_report_url=CASE WHEN COALESCE({prefix}_run_id, '') = '' THEN ? ELSE {prefix}_report_url END,
+              {prefix}_observed_at=CASE WHEN COALESCE({prefix}_run_id, '') = '' THEN ? ELSE {prefix}_observed_at END,
               updated_at=?""",
-        (run_id, run_id, report_url, report_url, observed_at, updated_at),
+        (run_id, report_url, observed_at, updated_at),
     )
 
 
@@ -648,6 +650,16 @@ def _render_versions_doc(
         state = feed_states.get(state_name)
         return marker or bool(state and (not state["complete"] or state["truncated"]))
 
+    def shown(value: Any, is_partial: bool) -> str:
+        """Last complete value; flagged stale while the feed's latest run is partial (a known advisory must not
+        vanish from the page because one upstream lookup failed)."""
+        text = str(value or "").strip()
+        if not is_partial:
+            return text
+        if not text or text == "unknown":
+            return "unknown (partial)"
+        return f"{text} (stale: latest run partial)"
+
     rendered_rows: list[str] = []
     for row in sorted(rows, key=lambda item: (
         str(item["host"]).casefold(),
@@ -657,11 +669,12 @@ def _render_versions_doc(
         kev_partial = partial(row, "kev")
         release_partial = partial(row, "release")
         version = row["kev_version"] or row["release_version"]
-        latest = "unknown (partial)" if release_partial else row["release_latest"]
-        behind = "unknown (partial)" if release_partial else row["release_behind"]
-        security_newer = "unknown (partial)" if release_partial else row["release_security_newer"]
-        notes = "unknown (partial)" if release_partial else row["release_notes"]
-        advisories = "unknown (partial)" if kev_partial else (row["kev_advisories"] or "0")
+        latest = shown(row["release_latest"], release_partial)
+        behind = shown(row["release_behind"], release_partial)
+        security_newer = shown(row["release_security_newer"], release_partial)
+        notes = shown(row["release_notes"], release_partial)
+        # No stored count means KEV never completed for this row: that is "unknown", never a clean "0".
+        advisories = shown(row["kev_advisories"], kev_partial) or "unknown"
         cells = [
             _markdown_cell(row["host"]),
             _markdown_cell(row["package"]),
@@ -670,7 +683,7 @@ def _render_versions_doc(
             _markdown_cell(latest),
             _markdown_cell(behind, empty="unknown"),
             _markdown_cell(security_newer, empty="unknown"),
-            _markdown_cell(advisories, empty="0"),
+            _markdown_cell(advisories, empty="unknown"),
             _markdown_cell(notes),
             _run_link(row["release_run_id"], row["release_report_url"]) or "—",
             _run_link(row["kev_run_id"], row["kev_report_url"]) or "—",

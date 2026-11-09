@@ -182,8 +182,8 @@ def test_partial_and_truncated_runs_preserve_state_and_mark_columns_unknown(tmp_
         assert partial.status_code == 200
         body = get_doc("ops/stack-versions.md")["body"]
         assert "node.example.com" in body and "1.2.3" in body
-        assert "unknown (partial)" in body
-        assert "CVE-2026-0002" not in body
+        assert "1 (CVE-2026-0002) (stale: latest run partial)" in body
+        assert "kev-good" in body and "kev-partial" not in body.split("| --- |")[-1]
         with connect() as db:
             row = db.execute(
                 "SELECT kev_advisories FROM center_deep_inventory_state"
@@ -200,13 +200,38 @@ def test_partial_and_truncated_runs_preserve_state_and_mark_columns_unknown(tmp_
         )
         assert truncated.status_code == 200
         body = get_doc("ops/stack-versions.md")["body"]
-        assert "v1.3.0" not in body
-        assert body.count("unknown (partial)") >= 4
+        assert "v1.3.0 (2026-11-07) (stale: latest run partial)" in body
+        assert body.count("(stale: latest run partial)") >= 3
         with connect() as db:
             row = db.execute(
                 "SELECT release_latest FROM center_deep_inventory_state"
             ).fetchone()
             assert row["release_latest"] == "v1.3.0 (2026-11-07)"
+
+
+def test_release_only_row_reads_unknown_advisories_until_kev_completes(tmp_path, monkeypatch):
+    _settings(tmp_path, monkeypatch)
+    from knowledge_ops import api
+    from knowledge_ops.wiki import get_doc
+
+    relay = _component("example.com/fictional/relay", repo="fictional/relay")
+    with TestClient(api.app) as client:
+        assert _post_signed(
+            client,
+            _delivery(
+                feed="github_releases", run_id="release-only", inventory=[relay],
+                releases=[_release()], comparisons=[_comparison()],
+            ),
+            "webhook-release-only",
+        ).status_code == 200
+        row = next(line for line in get_doc("ops/stack-versions.md")["body"].splitlines() if "fictional/relay" in line)
+        assert row.split(" | ")[7] == "unknown"
+
+        assert _post_signed(
+            client, _delivery(feed="kev", run_id="kev-clean", inventory=[relay]), "webhook-kev-clean",
+        ).status_code == 200
+        row = next(line for line in get_doc("ops/stack-versions.md")["body"].splitlines() if "fictional/relay" in line)
+        assert row.split(" | ")[7] == "0"
 
 
 def test_non_ascii_signature_is_a_401_not_a_type_error(tmp_path, monkeypatch):

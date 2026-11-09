@@ -109,8 +109,10 @@ columns. Release entries are also appended, deduplicated by repository and
 tag, to `ops/self-hosted-stack-releases-log.md` (the log retains 500 lines).
 The merge state is kept in SQLite, keyed by host, package, and ecosystem; the
 Markdown page is only its rendered projection. A partial or truncated delivery
-preserves the last values and renders the affected feed columns as
-`unknown (partial)`. A complete KEV inventory is the only delivery that removes
+preserves the last complete values and renders them flagged
+`(stale: latest run partial)`, with the row still linking the run that produced
+them; a column that never had a complete value reads `unknown (partial)`, and
+an advisory count that KEV never completed reads `unknown`, never `0`. A complete KEV inventory is the only delivery that removes
 components omitted from the canonical state. Each row retains its release and
 KEV source run links.
 
