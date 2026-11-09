@@ -16,9 +16,15 @@ concurrency:
   group: verify-${{ github.ref }}
   cancel-in-progress: true
 
+# ONE RUNNER FOR ALL FOUR JOBS. test-and-build hands its image to the other jobs by
+# image ID on the runner's own Docker daemon, never through a registry. Since
+# 2026-11-08 two runners answer `ubuntu-latest` (legacy1 and majiks-vps), and a job
+# that lands on the other one fails closed in a second with "No such image" (PR #11,
+# task 7373). `legacy1-canary` is the only label unique to one runner. To move this
+# workflow, change all four `runs-on` together, to another single-runner label.
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    runs-on: legacy1-canary
     timeout-minutes: 20
     outputs:
       image_id: ${{ steps.image.outputs.image_id }}
@@ -106,7 +112,7 @@ jobs:
   #   cryptography 49.0.0 CVE-2026-69247 — Bleichenbacher oracle. Fix = 50.0.0.
   # Dependency changes remain separately reviewable from the seed-corpus fix.
   vuln-audit:
-    runs-on: ubuntu-latest
+    runs-on: legacy1-canary
     timeout-minutes: 25
     needs: test-and-build
     env:
@@ -138,7 +144,7 @@ jobs:
   # existing runner shares its host Docker daemon between jobs; fail closed if
   # that artifact is unavailable. PRs exercise every gate but never publish.
   customer-image:
-    runs-on: ubuntu-latest
+    runs-on: legacy1-canary
     timeout-minutes: 30
     needs: test-and-build
     env:
@@ -211,7 +217,7 @@ jobs:
   # Publish only after correctness, corpus and vulnerability gates pass. Manual
   # runs on review branches can build/verify but cannot publish to the registry.
   publish-customer-image:
-    runs-on: ubuntu-latest
+    runs-on: legacy1-canary
     timeout-minutes: 20
     needs: [test-and-build, customer-image, vuln-audit]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/codex/knowledge-openwiki-hardening'

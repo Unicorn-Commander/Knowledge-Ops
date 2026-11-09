@@ -1,9 +1,12 @@
 # Knowledge-Ops — Magic Unicorn federated grounding layer
 FROM python:3.12.14-alpine3.23@sha256:167bc85084c9df34480efc26b4528fb68feaa8a79183b5658952137025b6f061
 
-# The pinned Python base retains an older util-linux subpackage. Pin the
-# Alpine security-fixed library explicitly; keep the image scan as the gate.
-RUN apk add --no-cache libuuid=2.41.6-r1
+# The pinned Python base retains older Alpine packages. Pin the security-fixed
+# ones explicitly; keep the image scan as the gate. 2026-11-08: musl + musl-utils
+# (CVE-2026-107891, fixed r24) and zlib (CVE-2026-85091, fixed 1.3.2-r1; the
+# 3.23 repository now carries 1.4-r0). Alpine keeps one version per package, so
+# a pin that goes stale fails this step loudly: bump it to the repository's.
+RUN apk add --no-cache libuuid=2.41.6-r1 musl=1.2.5-r24 musl-utils=1.2.5-r24 zlib=1.4-r0
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
